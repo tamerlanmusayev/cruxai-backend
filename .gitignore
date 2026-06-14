@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+
+# env — never commit secrets
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+prisma/*.db

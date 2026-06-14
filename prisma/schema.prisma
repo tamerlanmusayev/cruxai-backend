@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DocStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model User {
+  id        String            @id @default(cuid())
+  email     String?           @unique     // null = anonymous, upgradeable later
+  anonId    String?           @unique      // device/session identifier
+  createdAt DateTime          @default(now())
+  documents Document[]
+  reviews   FlashcardReview[]
+  masteries UserConcept[]
+  exams     Exam[]
+  attempts  Attempt[]
+}
+
+model Exam {
+  id          String   @id @default(cuid())
+  userId      String
+  documentId  String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  durationSec Int
+  questions   Json     // full QuizQuestion[] (with answers), server-side only
+  total       Int
+  score       Int?
+  weakReport  Json?    // [{ question, explanation }] for missed items
+  createdAt   DateTime @default(now())
+  @@index([userId, createdAt])
+}
+
+model Document {
+  id        String     @id @default(cuid())
+  userId    String?
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  text      String     // extracted plain text from the source files
+  language  String?    // detected/target language (e.g. "ru", "en", "az")
+  status     DocStatus   @default(PROCESSING)
+  error      String?
+  skipped    Json?       // [{ name, reason }] — files skipped during ingest
+  summary    Summary?
+  quizzes    Quiz[]
+  flashcards Flashcard[]
+  chunks     Chunk[]
+  concepts   Concept[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  @@index([userId, createdAt])
+}
+
+model Chunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  ordinal    Int      // 1-based position; used as the citation number
+  section    String?  // nearest heading / source file
+  text       String
+  @@index([documentId, ordinal])
+}
+
+model Concept {
+  id         String        @id @default(cuid())
+  documentId String
+  document   Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name       String
+  summary    String        // 1-2 sentence definition
+  difficulty Difficulty    @default(MEDIUM)
+  outEdges   ConceptEdge[] @relation("from")
+  inEdges    ConceptEdge[] @relation("to")
+  masteries  UserConcept[]
+  @@index([documentId])
+}
+
+model ConceptEdge {
+  id       String  @id @default(cuid())
+  fromId   String
+  toId     String
+  from     Concept @relation("from", fields: [fromId], references: [id], onDelete: Cascade)
+  to       Concept @relation("to", fields: [toId], references: [id], onDelete: Cascade)
+  relation String  // "prerequisite" | "part-of" | "related"
+  @@unique([fromId, toId, relation])
+}
+
+model UserConcept {
+  id        String   @id @default(cuid())
+  userId    String
+  conceptId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concept   Concept  @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  mastery   Float    @default(0) // 0..1 EWMA of correctness
+  seen      Int      @default(0)
+  correct   Int      @default(0)
+  updatedAt DateTime @updatedAt
+  @@unique([userId, conceptId])
+  @@index([userId, mastery])
+}
+
+model Flashcard {
+  id         String            @id @default(cuid())
+  documentId String
+  document   Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  front      String
+  back       String
+  difficulty Difficulty        @default(MEDIUM)
+  reviews    FlashcardReview[]
+  createdAt  DateTime          @default(now())
+  @@index([documentId])
+}
+
+model FlashcardReview {
+  id           String    @id @default(cuid())
+  userId       String
+  flashcardId  String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcard    Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  // SM-2 state
+  easeFactor   Float     @default(2.5)
+  intervalDays Int       @default(0)
+  repetitions  Int       @default(0)
+  dueAt        DateTime  @default(now())
+  lastGrade    Int?
+  @@unique([userId, flashcardId])
+  @@index([userId, dueAt])
+}
+
+model Summary {
+  id         String   @id @default(cuid())
+  documentId String   @unique
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  contentMd  String   // markdown summary (~5 pages) with [n] citation markers
+  keyPoints  Json     // string[] of key takeaways
+  citations  Json?    // [{ n, section, quote }] — sources behind the [n] markers
+  createdAt  DateTime @default(now())
+}
+
+model Quiz {
+  id         String    @id @default(cuid())
+  documentId String
+  document   Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  adaptive   Boolean   @default(false)
+  questions  Json      // QuizQuestion[]  (see ai.types.ts)
+  attempts   Attempt[]
+  createdAt  DateTime  @default(now())
+  @@index([documentId, createdAt])
+}
+
+model Attempt {
+  id        String   @id @default(cuid())
+  quizId    String
+  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers   Json     // number[] — chosen option index per question
+  score     Int      // number correct
+  total     Int      // total questions
+  feedback  Json     // QuestionFeedback[]
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+}
