@@ -18,8 +18,12 @@ export class ExamsService {
     private readonly ai: AiService,
   ) {}
 
-  /** Build a fresh timed exam for a document the user owns. */
-  async create(documentId: string, userId: string) {
+  /**
+   * Timed exam for a document the user owns.
+   * - `fresh=false` (page load): reuse the latest not-yet-submitted exam — no AI cost.
+   * - `fresh=true` ("new exam"): generate a new one. Generated from the SUMMARY.
+   */
+  async create(documentId: string, userId: string, fresh = false) {
     const doc = await this.prisma.document.findFirst({
       where: { id: documentId, userId },
     });
@@ -28,9 +32,25 @@ export class ExamsService {
       throw new BadRequestException('Document is not ready yet');
     }
 
+    if (!fresh) {
+      const existing = await this.prisma.exam.findFirst({
+        where: { documentId, userId, score: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) {
+        const qs = existing.questions as unknown as QuizQuestion[];
+        return {
+          id: existing.id,
+          durationSec: existing.durationSec,
+          questions: qs.map((q) => ({ question: q.question, options: q.options })),
+        };
+      }
+    }
+
+    const source = await this.sourceText(documentId, doc.text);
     const questions = await this.ai.makeQuiz(
       doc.title,
-      doc.text,
+      source,
       doc.language ?? 'en',
       EXAM_QUESTIONS,
     );
@@ -53,6 +73,19 @@ export class ExamsService {
         options: q.options,
       })),
     };
+  }
+
+  /** Generate from the (short) summary instead of the full document text. */
+  private async sourceText(documentId: string, fallback: string): Promise<string> {
+    const summary = await this.prisma.summary.findUnique({
+      where: { documentId },
+      select: { contentMd: true, keyPoints: true },
+    });
+    if (!summary) return fallback;
+    const points = Array.isArray(summary.keyPoints)
+      ? (summary.keyPoints as string[]).join('\n')
+      : '';
+    return `${summary.contentMd}\n\nKey points:\n${points}`;
   }
 
   /** Grade an exam submission, store score + weak-area report. */

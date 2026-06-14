@@ -29,9 +29,14 @@ export class ConceptsService {
       throw new BadRequestException('Document is not ready yet');
     }
 
+    // Extract from the (short) summary, not the full text — far cheaper.
+    const summary = await this.prisma.summary.findUnique({
+      where: { documentId },
+      select: { contentMd: true },
+    });
     const { concepts, edges } = await this.ai.extractConcepts(
       doc.title,
-      doc.text,
+      summary?.contentMd ?? doc.text,
       doc.language ?? 'en',
     );
 

@@ -1,4 +1,5 @@
 import { Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { QuizService } from './quiz.service';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -7,9 +8,16 @@ import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 export class QuizController {
   constructor(private readonly quiz: QuizService) {}
 
-  /** Generate (or fetch) an adaptive quiz for a document. */
+  /** Page load — reuse the cached quiz (no AI cost). */
   @Post()
   generate(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.quiz.generateOrGet(id, req.userId!);
+    return this.quiz.generateOrGet(id, req.userId!, false);
+  }
+
+  /** Explicit refresh — regenerate focused on weak concepts. Costs money → 2/min. */
+  @Post('refresh')
+  @Throttle({ default: { limit: 2, ttl: 60_000 } })
+  refresh(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.quiz.generateOrGet(id, req.userId!, true);
   }
 }

@@ -6,6 +6,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ExamsService } from './exams.service';
 import { SubmitAttemptDto } from '../attempts/dto/submit-attempt.dto';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
@@ -15,10 +16,17 @@ import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 export class ExamsController {
   constructor(private readonly exams: ExamsService) {}
 
-  /** Create a timed exam for a document. */
+  /** Page load — reuse the latest unsubmitted exam (no AI cost). */
   @Post('documents/:id/exams')
   create(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.exams.create(id, req.userId!);
+    return this.exams.create(id, req.userId!, false);
+  }
+
+  /** "New exam" — generate a fresh one. Costs money → max 2/min. */
+  @Post('documents/:id/exams/new')
+  @Throttle({ default: { limit: 2, ttl: 60_000 } })
+  createNew(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.exams.create(id, req.userId!, true);
   }
 
   /** Submit answers; get score, prediction, and weak-area report. */

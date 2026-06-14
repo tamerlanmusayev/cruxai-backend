@@ -18,11 +18,12 @@ export class QuizService {
   ) {}
 
   /**
-   * Returns a quiz for the document. For a signed-in user with prior results,
-   * generates a fresh ADAPTIVE quiz focused on their weak concepts; otherwise
-   * reuses the latest cached quiz (or creates a base one).
+   * Returns a quiz for the document.
+   * - `fresh=false` (page load): reuse the latest cached quiz — no AI cost.
+   * - `fresh=true` (explicit "refresh"): regenerate, focused on weak concepts.
+   * Questions are generated from the SUMMARY (cheap) rather than the full text.
    */
-  async generateOrGet(documentId: string, userId: string) {
+  async generateOrGet(documentId: string, userId: string, fresh = false) {
     const doc = await this.prisma.document.findFirst({
       where: { id: documentId, userId },
     });
@@ -31,22 +32,20 @@ export class QuizService {
       throw new BadRequestException('Document is not ready yet');
     }
 
-    const weak = await this.mastery.weakConcepts(userId, documentId);
-
-    if (!weak.length) {
-      // No adaptive signal yet — reuse the latest cached quiz if present.
+    if (!fresh) {
       const cached = await this.prisma.quiz.findFirst({
-        where: { documentId, adaptive: false },
+        where: { documentId },
         orderBy: { createdAt: 'desc' },
       });
-      if (cached) {
-        return this.sanitize(cached.id, cached.questions, false);
-      }
+      if (cached) return this.sanitize(cached.id, cached.questions, cached.adaptive);
     }
+
+    const weak = fresh ? await this.mastery.weakConcepts(userId, documentId) : [];
+    const source = await this.sourceText(documentId, doc.text);
 
     const questions = await this.ai.makeQuiz(
       doc.title,
-      doc.text,
+      source,
       doc.language ?? 'en',
       5,
       weak,
@@ -61,7 +60,19 @@ export class QuizService {
     return this.sanitize(quiz.id, questions, weak.length > 0, weak);
   }
 
-  /** Strip answers/explanations before sending to the client. */
+  /** Generate from the (short) summary instead of the full document text. */
+  private async sourceText(documentId: string, fallback: string): Promise<string> {
+    const summary = await this.prisma.summary.findUnique({
+      where: { documentId },
+      select: { contentMd: true, keyPoints: true },
+    });
+    if (!summary) return fallback;
+    const points = Array.isArray(summary.keyPoints)
+      ? (summary.keyPoints as string[]).join('\n')
+      : '';
+    return `${summary.contentMd}\n\nKey points:\n${points}`;
+  }
+
   private sanitize(
     id: string,
     questions: unknown,
@@ -73,10 +84,7 @@ export class QuizService {
       id,
       adaptive,
       focusedOn,
-      questions: list.map((q) => ({
-        question: q.question,
-        options: q.options,
-      })),
+      questions: list.map((q) => ({ question: q.question, options: q.options })),
     };
   }
 }
