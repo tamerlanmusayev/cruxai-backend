@@ -60,7 +60,7 @@ export class DocumentsService {
     if (dto.sources.length > MAX_FILES) {
       throw new ForbiddenException(`Too many files (max ${MAX_FILES}).`);
     }
-    const language = ['az', 'ru', 'en'].includes(dto.lang ?? '')
+    const language = ['az', 'ru', 'en', 'tr', 'kk', 'uz', 'ka'].includes(dto.lang ?? '')
       ? dto.lang
       : undefined;
     const first = dto.sources[0].name.replace(/\.[a-z0-9]+$/i, '');
