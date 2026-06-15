@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -7,15 +6,12 @@ import {
   Patch,
   Post,
   Req,
-  UploadedFiles,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { DocumentsService } from './documents.service';
-import { IncomingFile, MAX_FILES, MAX_TOTAL_BYTES } from './extract.util';
 import { UpdateSummaryDto } from './dto/update-summary.dto';
+import { CreateDocumentDto, RequestUploadsDto } from './dto/upload.dto';
 import { RecaptchaGuard } from '../security/recaptcha.guard';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -23,29 +19,20 @@ import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
-  /** Upload one or more files (combined into a single study set). */
+  /** Step 1 — get presigned URLs to upload the files directly to storage. */
+  @Post('uploads')
+  @UseGuards(JwtAuthGuard, RecaptchaGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  requestUploads(@Body() body: RequestUploadsDto) {
+    return this.documents.requestUploads(body);
+  }
+
+  /** Step 2 — create the document from uploaded keys; processing is queued. */
   @Post()
   @UseGuards(JwtAuthGuard, RecaptchaGuard)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } }) // 5 uploads / minute / IP
-  @UseInterceptors(
-    FilesInterceptor('files', MAX_FILES, {
-      limits: { fileSize: MAX_TOTAL_BYTES, files: MAX_FILES },
-    }),
-  )
-  async upload(
-    @Req() req: AuthedRequest,
-    @UploadedFiles() files?: IncomingFile[],
-    @Body('lang') lang?: string,
-  ) {
-    if (!files?.length) {
-      throw new BadRequestException('No files uploaded (field "files")');
-    }
-    const language = ['az', 'ru', 'en'].includes(lang ?? '') ? lang : undefined;
-    try {
-      return await this.documents.createFromFiles(files, language, req.userId);
-    } catch (err) {
-      throw new BadRequestException(String((err as Error)?.message ?? err));
-    }
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  create(@Req() req: AuthedRequest, @Body() body: CreateDocumentDto) {
+    return this.documents.create(body, req.userId);
   }
 
   /** The authenticated user's library. */

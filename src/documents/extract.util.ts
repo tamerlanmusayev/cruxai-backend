@@ -14,16 +14,17 @@ export interface IncomingFile {
   size: number;
 }
 
-const SUPPORTED = ['.pdf', '.docx', '.txt', '.md', '.markdown'];
+export const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.markdown'];
 
-function ext(name: string): string {
+/** Lowercased file extension (with dot), or '' if none. */
+export function extOf(name: string): string {
   const m = name.toLowerCase().match(/\.[a-z0-9]+$/);
   return m ? m[0] : '';
 }
 
 /** Extract text from one file based on its extension. */
 async function extractOne(file: IncomingFile): Promise<string> {
-  const e = ext(file.originalname);
+  const e = extOf(file.originalname);
   switch (e) {
     case '.pdf': {
       const data = await pdfParse(file.buffer);
@@ -82,7 +83,7 @@ export async function extractFiles(files: IncomingFile[]): Promise<{
   const skipped: SkippedFile[] = [];
 
   for (const f of files) {
-    if (!SUPPORTED.includes(ext(f.originalname))) {
+    if (!SUPPORTED_EXTENSIONS.includes(extOf(f.originalname))) {
       skipped.push({ name: f.originalname, reason: 'Unsupported format' });
       continue;
     }

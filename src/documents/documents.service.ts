@@ -5,31 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiService } from '../ai/ai.service';
-import { extractFiles, IncomingFile } from './extract.util';
-import { chunkText } from './chunk.util';
+import { StorageService } from '../storage/storage.service';
+import { QueueService } from '../queue/queue.service';
+import {
+  MAX_FILES,
+  MAX_TOTAL_BYTES,
+  SUPPORTED_EXTENSIONS,
+  extOf,
+} from './extract.util';
 import { Prisma } from '@prisma/client';
 import { UpdateSummaryDto } from './dto/update-summary.dto';
-
-/** Map raw provider/internal errors to a clean, user-facing message. */
-function friendlyError(raw: string): string {
-  const s = raw.toLowerCase();
-  if (s.includes('credit balance') || s.includes('billing') || s.includes('quota')) {
-    return 'AI is temporarily unavailable (service capacity). Please try again later.';
-  }
-  if (s.includes('401') || s.includes('authentication') || s.includes('api key')) {
-    return 'AI service is not configured right now. Please try again later.';
-  }
-  if (s.includes('429') || s.includes('rate limit') || s.includes('overloaded')) {
-    return 'The AI is busy right now — please try again in a minute.';
-  }
-  if (s.startsWith('4') && s.includes('{')) {
-    // Any other raw HTTP/JSON provider error — don't leak internals.
-    return 'Something went wrong while processing this document. Please try again.';
-  }
-  // Our own validation messages (page limit, scanned, etc.) are already friendly.
-  return raw.slice(0, 300);
-}
+import { CreateDocumentDto, RequestUploadsDto } from './dto/upload.dto';
+import { PROCESS_QUEUE } from './processing.service';
 
 @Injectable()
 export class DocumentsService {
@@ -37,78 +24,65 @@ export class DocumentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ai: AiService,
+    private readonly storage: StorageService,
+    private readonly queue: QueueService,
   ) {}
 
-  /** Extract text from one or more files, store, and summarize in background. */
-  async createFromFiles(files: IncomingFile[], lang?: string, userId?: string) {
-    const { title, text, skipped } = await extractFiles(files);
+  /** Validate a batch and hand back presigned PUT URLs (one per file). */
+  async requestUploads(dto: RequestUploadsDto) {
+    const total = dto.files.reduce((sum, f) => sum + f.size, 0);
+    if (total > MAX_TOTAL_BYTES) {
+      const mb = (total / 1024 / 1024).toFixed(1);
+      throw new ForbiddenException(
+        `Total size ${mb} MB exceeds the ${MAX_TOTAL_BYTES / 1024 / 1024} MB limit.`,
+      );
+    }
+    const uploads = await Promise.all(
+      dto.files.map(async (f) => {
+        if (!SUPPORTED_EXTENSIONS.includes(extOf(f.name))) {
+          throw new ForbiddenException(
+            `"${f.name}": unsupported format. Use PDF, DOCX, TXT or MD.`,
+          );
+        }
+        const key = this.storage.newKey(f.name);
+        const url = await this.storage.presignPut(
+          key,
+          f.type ?? 'application/octet-stream',
+        );
+        return { name: f.name, key, url };
+      }),
+    );
+    return { uploads };
+  }
+
+  /** Create a document from uploaded keys and queue it for processing. */
+  async create(dto: CreateDocumentDto, userId?: string) {
+    if (dto.sources.length > MAX_FILES) {
+      throw new ForbiddenException(`Too many files (max ${MAX_FILES}).`);
+    }
+    const language = ['az', 'ru', 'en'].includes(dto.lang ?? '')
+      ? dto.lang
+      : undefined;
+    const first = dto.sources[0].name.replace(/\.[a-z0-9]+$/i, '');
+    const title =
+      dto.sources.length === 1
+        ? first
+        : `${first} +${dto.sources.length - 1} more`;
 
     const doc = await this.prisma.document.create({
       data: {
-        title,
-        text,
-        status: 'PROCESSING',
+        title: (title || 'Untitled').slice(0, 200),
+        status: 'QUEUED',
         userId,
-        skipped: skipped.length
-          ? (skipped as unknown as Prisma.InputJsonValue)
-          : undefined,
+        language,
+        sources: dto.sources as unknown as Prisma.InputJsonValue,
       },
       select: { id: true, title: true, status: true, createdAt: true },
     });
 
-    // Fire-and-forget: client polls GET /documents/:id for status.
-    void this.process(doc.id, title, text, lang);
-
-    return { ...doc, skipped };
-  }
-
-  private async process(
-    id: string,
-    title: string,
-    text: string,
-    lang?: string,
-  ) {
-    try {
-      const chunks = chunkText(text);
-      const summary = await this.ai.summarize(title, chunks, lang);
-      await this.prisma.$transaction([
-        this.prisma.chunk.createMany({
-          data: chunks.map((c) => ({
-            documentId: id,
-            ordinal: c.ordinal,
-            section: c.section,
-            text: c.text,
-          })),
-        }),
-        this.prisma.summary.create({
-          data: {
-            documentId: id,
-            contentMd: summary.contentMd,
-            keyPoints: summary.keyPoints,
-            citations: summary.citations as unknown as Prisma.InputJsonValue,
-          },
-        }),
-        this.prisma.document.update({
-          where: { id },
-          data: { status: 'READY', language: summary.language },
-        }),
-      ]);
-      this.log.log(
-        `Document ${id} summarized (${summary.language}, ${chunks.length} chunks)`,
-      );
-    } catch (err) {
-      const raw = String((err as Error)?.message ?? err);
-      this.log.error(`Document ${id} failed: ${raw}`);
-      try {
-        await this.prisma.document.update({
-          where: { id },
-          data: { status: 'FAILED', error: friendlyError(raw) },
-        });
-      } catch (e) {
-        this.log.error(`Could not mark ${id} FAILED: ${e}`);
-      }
-    }
+    await this.queue.enqueue(PROCESS_QUEUE, { documentId: doc.id });
+    this.log.log(`Document ${doc.id} queued (${dto.sources.length} file(s))`);
+    return doc;
   }
 
   /** A user's library — most recent first. */

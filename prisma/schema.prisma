@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum DocStatus {
+  QUEUED
   PROCESSING
   READY
   FAILED
@@ -50,10 +51,11 @@ model Document {
   userId    String?
   user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
-  text      String     // extracted plain text from the source files
+  text      String      @default("") // extracted text; filled by the worker after ingest
   language  String?    // detected/target language (e.g. "ru", "en", "az")
   status     DocStatus   @default(PROCESSING)
   error      String?
+  sources    Json?       // [{ key, name }] — uploaded object keys the worker fetches
   skipped    Json?       // [{ name, reason }] — files skipped during ingest
   summary    Summary?
   quizzes    Quiz[]

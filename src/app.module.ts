@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
+import { StorageModule } from './storage/storage.module';
+import { QueueModule } from './queue/queue.module';
 import { AuthModule } from './auth/auth.module';
 import { AiModule } from './ai/ai.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -20,6 +22,8 @@ import { StatsModule } from './stats/stats.module';
     // Global rate limit: 30 requests / minute / IP (stricter on uploads).
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     PrismaModule,
+    StorageModule,
+    QueueModule,
     AuthModule,
     AiModule,
     DocumentsModule,
