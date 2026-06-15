@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { MasteryService } from '../progress/mastery.service';
 import { QuizQuestion } from '../ai/ai.types';
+import { UsageService } from '../usage/usage.service';
 
 @Injectable()
 export class QuizService {
@@ -15,6 +16,7 @@ export class QuizService {
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
     private readonly mastery: MasteryService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -43,6 +45,7 @@ export class QuizService {
     const weak = fresh ? await this.mastery.weakConcepts(userId, documentId) : [];
     const source = await this.sourceText(documentId, doc.text);
 
+    this.usage.consume(userId, 'quiz');
     const questions = await this.ai.makeQuiz(
       doc.title,
       source,

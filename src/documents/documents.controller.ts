@@ -16,7 +16,6 @@ import { UpdateSummaryDto } from './dto/update-summary.dto';
 import { CreateDocumentDto, OverviewDto, RequestUploadsDto } from './dto/upload.dto';
 import { RecaptchaGuard } from '../security/recaptcha.guard';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
-import { GenerationLimitGuard } from '../usage/generation-limit.guard';
 
 @Controller('documents')
 export class DocumentsController {
@@ -32,7 +31,7 @@ export class DocumentsController {
 
   /** Step 2 — create the document from uploaded keys; processing is queued. */
   @Post()
-  @UseGuards(JwtAuthGuard, RecaptchaGuard, GenerationLimitGuard)
+  @UseGuards(JwtAuthGuard, RecaptchaGuard)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   create(@Req() req: AuthedRequest, @Body() body: CreateDocumentDto) {
     return this.documents.create(body, req.userId);
@@ -40,7 +39,7 @@ export class DocumentsController {
 
   /** Generate an AI overview document for a book by title (copyrighted books). */
   @Post('overview')
-  @UseGuards(JwtAuthGuard, RecaptchaGuard, GenerationLimitGuard)
+  @UseGuards(JwtAuthGuard, RecaptchaGuard)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   overview(@Req() req: AuthedRequest, @Body() body: OverviewDto) {
     return this.documents.createOverview(body.title, body.lang, req.userId);

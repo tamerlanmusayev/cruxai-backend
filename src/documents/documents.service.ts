@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { StorageService } from '../storage/storage.service';
 import { QueueService } from '../queue/queue.service';
+import { UsageService } from '../usage/usage.service';
 import { friendlyError } from './friendly-error.util';
 import {
   MAX_FILES,
@@ -29,6 +30,7 @@ export class DocumentsService {
     private readonly ai: AiService,
     private readonly storage: StorageService,
     private readonly queue: QueueService,
+    private readonly usage: UsageService,
   ) {}
 
   /** Create a document from an AI-generated overview of a (copyrighted) book. */
@@ -36,6 +38,8 @@ export class DocumentsService {
     const language = ['az', 'ru', 'en', 'tr', 'kk', 'uz', 'ka'].includes(lang ?? '')
       ? lang
       : undefined;
+    // Charge the budget before creating the doc so a 429 reaches the client.
+    if (userId) this.usage.consume(userId, 'overview');
     const doc = await this.prisma.document.create({
       data: { title: title.slice(0, 200) || 'Book', status: 'PROCESSING', userId, language },
       select: { id: true, title: true, status: true, createdAt: true },
@@ -98,6 +102,10 @@ export class DocumentsService {
       dto.sources.length === 1
         ? first
         : `${first} +${dto.sources.length - 1} more`;
+
+    // Charge the (heavy) summary cost up front so an over-budget user is
+    // rejected immediately instead of queueing a doc that can't be processed.
+    if (userId) this.usage.consume(userId, 'summary');
 
     const doc = await this.prisma.document.create({
       data: {

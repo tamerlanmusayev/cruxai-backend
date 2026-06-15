@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
+import { UsageService } from '../usage/usage.service';
 import { sm2 } from './sm2';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class FlashcardsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
+    private readonly usage: UsageService,
   ) {}
 
   /** Generate the deck for a document the user owns; return existing otherwise. */
@@ -36,6 +38,7 @@ export class FlashcardsService {
       where: { documentId },
       select: { contentMd: true },
     });
+    this.usage.consume(userId, 'flashcards');
     const drafts = await this.ai.makeFlashcards(
       doc.title,
       summary?.contentMd ?? doc.text,

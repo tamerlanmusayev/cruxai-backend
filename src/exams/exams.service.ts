@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { QuizQuestion } from '../ai/ai.types';
+import { UsageService } from '../usage/usage.service';
 
 const EXAM_QUESTIONS = 10;
 const SECONDS_PER_QUESTION = 60;
@@ -16,6 +17,7 @@ export class ExamsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -48,6 +50,7 @@ export class ExamsService {
     }
 
     const source = await this.sourceText(documentId, doc.text);
+    this.usage.consume(userId, 'exam');
     const questions = await this.ai.makeQuiz(
       doc.title,
       source,

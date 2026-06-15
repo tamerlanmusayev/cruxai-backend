@@ -5,12 +5,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
+import { UsageService } from '../usage/usage.service';
 
 @Injectable()
 export class ConceptsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
+    private readonly usage: UsageService,
   ) {}
 
   /** Build the knowledge graph for a document the user owns; cache after. */
@@ -34,6 +36,7 @@ export class ConceptsService {
       where: { documentId },
       select: { contentMd: true },
     });
+    this.usage.consume(userId, 'graph');
     const { concepts, edges } = await this.ai.extractConcepts(
       doc.title,
       summary?.contentMd ?? doc.text,
