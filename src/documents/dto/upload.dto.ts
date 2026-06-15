@@ -70,3 +70,15 @@ export class CreateDocumentDto {
   @MaxLength(5)
   lang?: string;
 }
+
+/** Generate an AI overview document for a book by title. */
+export class OverviewDto {
+  @IsString()
+  @MaxLength(300)
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  lang?: string;
+}

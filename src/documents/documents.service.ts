@@ -5,8 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiService } from '../ai/ai.service';
 import { StorageService } from '../storage/storage.service';
 import { QueueService } from '../queue/queue.service';
+import { friendlyError } from './friendly-error.util';
 import {
   MAX_FILES,
   MAX_TOTAL_BYTES,
@@ -24,9 +26,37 @@ export class DocumentsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly ai: AiService,
     private readonly storage: StorageService,
     private readonly queue: QueueService,
   ) {}
+
+  /** Create a document from an AI-generated overview of a (copyrighted) book. */
+  async createOverview(title: string, lang: string | undefined, userId?: string) {
+    const language = ['az', 'ru', 'en', 'tr', 'kk', 'uz', 'ka'].includes(lang ?? '')
+      ? lang
+      : undefined;
+    const doc = await this.prisma.document.create({
+      data: { title: title.slice(0, 200) || 'Book', status: 'PROCESSING', userId, language },
+      select: { id: true, title: true, status: true, createdAt: true },
+    });
+    try {
+      const ov = await this.ai.bookOverview(title, language);
+      await this.prisma.summary.create({
+        data: { documentId: doc.id, contentMd: ov.contentMd, keyPoints: ov.keyPoints },
+      });
+      await this.prisma.document.update({
+        where: { id: doc.id },
+        data: { status: 'READY', language: ov.language },
+      });
+    } catch (e) {
+      await this.prisma.document.update({
+        where: { id: doc.id },
+        data: { status: 'FAILED', error: friendlyError(String((e as Error)?.message ?? e)) },
+      });
+    }
+    return doc;
+  }
 
   /** Validate a batch and hand back presigned PUT URLs (one per file). */
   async requestUploads(dto: RequestUploadsDto) {

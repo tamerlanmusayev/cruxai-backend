@@ -378,6 +378,47 @@ export class AiService {
     });
   }
 
+  /**
+   * Write a study overview of a well-known book FROM THE MODEL'S KNOWLEDGE
+   * (used for copyrighted books whose full text we can't legally fetch).
+   * Clearly framed as an overview, not a citation-grounded summary.
+   */
+  async bookOverview(
+    title: string,
+    targetLang?: string,
+  ): Promise<{ contentMd: string; keyPoints: string[]; language: string }> {
+    const langName = LANG_NAMES[targetLang ?? ''];
+    const langRule = langName
+      ? `Write everything in ${langName}.`
+      : 'Write in the language of the book title, or English if unsure.';
+    const result = await this.structured<{ contentMd: string; keyPoints: string[] }>({
+      model: this.modelSummary,
+      maxTokens: 4096,
+      system:
+        'You are an expert tutor. Write a clear study overview of a well-known ' +
+        'book from your own knowledge of it. ' +
+        langRule +
+        ' Cover the core ideas, key arguments, structure, and main takeaways. ' +
+        'Begin with a short italicized note that this is an AI overview based on ' +
+        'public knowledge of the book, not its full text. Never invent a book — ' +
+        'if you do not actually know it, say so plainly in the overview.',
+      user:
+        `Write a ~2 page markdown study overview of the book titled "${title}". ` +
+        'Use headings and bullet lists. Then give 5–8 key takeaways.',
+      toolName: 'save_overview',
+      toolDescription: 'Save the book overview.',
+      schema: {
+        type: 'object',
+        properties: {
+          contentMd: { type: 'string', description: 'Overview markdown (~2 pages).' },
+          keyPoints: { type: 'array', items: { type: 'string' }, description: '5–8 takeaways.' },
+        },
+        required: ['contentMd', 'keyPoints'],
+      },
+    });
+    return { ...result, language: targetLang ?? 'en' };
+  }
+
   /** Recommend well-known real books for a learning goal/topic. */
   async recommendBooks(
     topic: string,

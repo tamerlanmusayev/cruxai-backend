@@ -12,7 +12,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { DocumentsService } from './documents.service';
 import { UpdateSummaryDto } from './dto/update-summary.dto';
-import { CreateDocumentDto, RequestUploadsDto } from './dto/upload.dto';
+import { CreateDocumentDto, OverviewDto, RequestUploadsDto } from './dto/upload.dto';
 import { RecaptchaGuard } from '../security/recaptcha.guard';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 import { GenerationLimitGuard } from '../usage/generation-limit.guard';
@@ -35,6 +35,14 @@ export class DocumentsController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   create(@Req() req: AuthedRequest, @Body() body: CreateDocumentDto) {
     return this.documents.create(body, req.userId);
+  }
+
+  /** Generate an AI overview document for a book by title (copyrighted books). */
+  @Post('overview')
+  @UseGuards(JwtAuthGuard, RecaptchaGuard, GenerationLimitGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  overview(@Req() req: AuthedRequest, @Body() body: OverviewDto) {
+    return this.documents.createOverview(body.title, body.lang, req.userId);
   }
 
   /** The authenticated user's library (paginated). */
