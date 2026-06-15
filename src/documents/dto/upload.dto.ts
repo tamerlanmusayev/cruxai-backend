@@ -40,9 +40,16 @@ export class RequestUploadsDto {
 }
 
 export class SourceRefDto {
+  // Either an uploaded object key OR a remote URL the worker downloads.
+  @IsOptional()
   @IsString()
   @MaxLength(300)
-  key: string;
+  key?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  url?: string;
 
   @IsString()
   @MaxLength(300)

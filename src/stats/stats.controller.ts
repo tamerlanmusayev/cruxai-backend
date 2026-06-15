@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { PresenceGateway } from './presence.gateway';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DEMO_MODE, demoStats } from './demo.util';
 
 interface DayCount {
@@ -12,7 +12,7 @@ interface DayCount {
 export class StatsController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly presence: PresenceGateway,
+    private readonly presence: RealtimeGateway,
   ) {}
 
   /** Public, aggregate-only metrics — all real (no fabricated numbers). */

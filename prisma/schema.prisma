@@ -67,6 +67,16 @@ model Document {
   @@index([userId, createdAt])
 }
 
+model Review {
+  id        String   @id @default(cuid())
+  userId    String?  // anonymous author allowed
+  rating    Int      // 1..5 stars
+  comment   String?
+  name      String?  // optional display name
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+
 model Chunk {
   id         String   @id @default(cuid())
   documentId String
