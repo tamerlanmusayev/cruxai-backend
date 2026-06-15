@@ -24,6 +24,8 @@ model User {
   id        String            @id @default(cuid())
   email     String?           @unique     // null = anonymous, upgradeable later
   anonId    String?           @unique      // device/session identifier
+  name      String?                        // display name (from Google)
+  picture   String?                        // avatar URL (from Google)
   createdAt DateTime          @default(now())
   documents Document[]
   reviews   FlashcardReview[]
