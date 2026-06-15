@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -64,6 +65,13 @@ export class DocumentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.documents.findOne(id);
+  }
+
+  /** Owner-only delete (cascades to summary/quizzes/flashcards/concepts/etc). */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  remove(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.documents.remove(id, req.userId!);
   }
 
   /** Owner-only inline edit of the generated summary. */

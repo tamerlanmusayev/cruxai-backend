@@ -47,4 +47,11 @@ export class UsageService {
     this.global += 1;
     this.perUser.set(userId, used + 1);
   }
+
+  /** Read remaining quota for a user (no consumption). */
+  status(userId: string): { used: number; limit: number; remaining: number } {
+    this.roll(new Date().toISOString().slice(0, 10));
+    const used = this.perUser.get(userId) ?? 0;
+    return { used, limit: this.userCap, remaining: Math.max(0, this.userCap - used) };
+  }
 }

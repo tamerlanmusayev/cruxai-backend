@@ -153,6 +153,24 @@ export class DocumentsService {
     return doc;
   }
 
+  /** Owner-only delete. Cascades remove summary/chunks/quizzes/flashcards/
+   * concepts (and their attempts/reviews/masteries) — so the doc disappears
+   * from library, review, progress and synthesis. Exams have no FK, so we
+   * clear them explicitly. */
+  async remove(id: string, userId: string) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    if (doc.userId && doc.userId !== userId) {
+      throw new ForbiddenException('Not your document');
+    }
+    await this.prisma.exam.deleteMany({ where: { documentId: id } });
+    await this.prisma.document.delete({ where: { id } });
+    return { ok: true };
+  }
+
   /** Owner-only inline edits to the generated summary (no AI cost). */
   async updateSummary(id: string, userId: string, dto: UpdateSummaryDto) {
     const doc = await this.prisma.document.findUnique({
