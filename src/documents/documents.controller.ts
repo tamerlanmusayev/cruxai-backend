@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   UploadedFiles,
@@ -14,6 +15,7 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { DocumentsService } from './documents.service';
 import { IncomingFile, MAX_FILES, MAX_TOTAL_BYTES } from './extract.util';
+import { UpdateSummaryDto } from './dto/update-summary.dto';
 import { RecaptchaGuard } from '../security/recaptcha.guard';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -57,5 +59,17 @@ export class DocumentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.documents.findOne(id);
+  }
+
+  /** Owner-only inline edit of the generated summary. */
+  @Patch(':id/summary')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  updateSummary(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: UpdateSummaryDto,
+  ) {
+    return this.documents.updateSummary(id, req.userId!, body);
   }
 }

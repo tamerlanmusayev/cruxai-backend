@@ -1,9 +1,15 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { extractFiles, IncomingFile } from './extract.util';
 import { chunkText } from './chunk.util';
 import { Prisma } from '@prisma/client';
+import { UpdateSummaryDto } from './dto/update-summary.dto';
 
 /** Map raw provider/internal errors to a clean, user-facing message. */
 function friendlyError(raw: string): string {
@@ -139,5 +145,28 @@ export class DocumentsService {
     });
     if (!doc) throw new NotFoundException('Document not found');
     return doc;
+  }
+
+  /** Owner-only inline edits to the generated summary (no AI cost). */
+  async updateSummary(id: string, userId: string, dto: UpdateSummaryDto) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id },
+      select: { userId: true, summary: { select: { id: true } } },
+    });
+    if (!doc || !doc.summary) throw new NotFoundException('Document not found');
+    if (doc.userId && doc.userId !== userId) {
+      throw new ForbiddenException('Not your document');
+    }
+    await this.prisma.summary.update({
+      where: { documentId: id },
+      data: {
+        contentMd: dto.contentMd,
+        keyPoints:
+          dto.keyPoints === undefined
+            ? undefined
+            : (dto.keyPoints as unknown as Prisma.InputJsonValue),
+      },
+    });
+    return this.findOne(id);
   }
 }
