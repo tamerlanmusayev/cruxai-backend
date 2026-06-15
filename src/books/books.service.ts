@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AiService } from '../ai/ai.service';
 
 const GUTENDEX = process.env.GUTENDEX_URL ?? 'https://gutendex.com/books';
 
@@ -8,6 +9,14 @@ export interface BookHit {
   author: string;
   cover: string | null;
   textUrl: string | null;
+}
+
+export interface BookRecommendation {
+  title: string;
+  author: string;
+  why: string;
+  cover: string | null;
+  textUrl: string | null; // free full text if a public-domain match exists
 }
 
 interface GutendexBook {
@@ -25,6 +34,33 @@ interface GutendexBook {
 export class BooksService {
   private readonly log = new Logger(BooksService.name);
   private cachedCount = 0;
+
+  constructor(private readonly ai: AiService) {}
+
+  /**
+   * AI-curated reading list for a goal/topic, with a free full-text link
+   * attached when a public-domain match exists in the catalogue.
+   */
+  async recommend(topic: string, lang?: string): Promise<BookRecommendation[]> {
+    const recs = await this.ai.recommendBooks(topic, lang);
+    return Promise.all(
+      recs.map(async (r) => {
+        let cover: string | null = null;
+        let textUrl: string | null = null;
+        try {
+          const hits = await this.search(r.title);
+          const match = hits.find((h) => h.textUrl) ?? hits[0];
+          if (match) {
+            cover = match.cover;
+            textUrl = match.textUrl;
+          }
+        } catch {
+          /* discovery is best-effort */
+        }
+        return { ...r, cover, textUrl };
+      }),
+    );
+  }
 
   async search(q: string): Promise<BookHit[]> {
     if (!q.trim()) return [];

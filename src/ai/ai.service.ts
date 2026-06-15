@@ -19,6 +19,10 @@ const LANG_NAMES: Record<string, string> = {
   az: 'Azerbaijani',
   ru: 'Russian',
   en: 'English',
+  tr: 'Turkish',
+  kk: 'Kazakh',
+  uz: 'Uzbek',
+  ka: 'Georgian',
 };
 
 @Injectable()
@@ -370,6 +374,51 @@ export class AiService {
         required: ['consensus', 'differences'],
       },
     });
+  }
+
+  /** Recommend well-known real books for a learning goal/topic. */
+  async recommendBooks(
+    topic: string,
+    targetLang?: string,
+  ): Promise<{ title: string; author: string; why: string }[]> {
+    const langName = LANG_NAMES[targetLang ?? ''] ?? 'English';
+    const result = await this.structured<{
+      books: { title: string; author: string; why: string }[];
+    }>({
+      model: this.modelQuiz,
+      maxTokens: 2048,
+      system:
+        'You are a well-read librarian. Recommend real, well-known, existing ' +
+        `books (never invent titles). Write the "why" in ${langName}, but keep ` +
+        'each book title in its original language/spelling so it can be searched.',
+      user:
+        `Recommend up to 8 of the best books for this goal: "${topic}". ` +
+        'For each, give the exact title, the author, and one short sentence on ' +
+        'why it is worth reading for this goal.',
+      toolName: 'save_recommendations',
+      toolDescription: 'Save the recommended book list.',
+      schema: {
+        type: 'object',
+        properties: {
+          books: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 8,
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                author: { type: 'string' },
+                why: { type: 'string' },
+              },
+              required: ['title', 'author', 'why'],
+            },
+          },
+        },
+        required: ['books'],
+      },
+    });
+    return result.books;
   }
 
   async grade(

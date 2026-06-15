@@ -1,6 +1,7 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { BooksService } from './books.service';
+import { RecommendDto } from './dto/recommend.dto';
 
 @Controller('books')
 export class BooksController {
@@ -17,5 +18,12 @@ export class BooksController {
   @Get('count')
   async count() {
     return { count: await this.books.count() };
+  }
+
+  /** AI-curated reading list for a goal/topic (costs AI → rate-limited). */
+  @Post('recommend')
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  recommend(@Body() body: RecommendDto) {
+    return this.books.recommend(body.topic, body.lang);
   }
 }
