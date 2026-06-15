@@ -85,11 +85,13 @@ export class DocumentsService {
     return doc;
   }
 
-  /** A user's library — most recent first. */
-  async listForUser(userId: string) {
+  /** A user's library — most recent first, paginated. */
+  async listForUser(userId: string, skip = 0, take = 10) {
     return this.prisma.document.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take,
       select: {
         id: true,
         title: true,

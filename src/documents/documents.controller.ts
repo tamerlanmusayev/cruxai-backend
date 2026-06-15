@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -35,11 +36,19 @@ export class DocumentsController {
     return this.documents.create(body, req.userId);
   }
 
-  /** The authenticated user's library. */
+  /** The authenticated user's library (paginated). */
   @Get()
   @UseGuards(JwtAuthGuard)
-  list(@Req() req: AuthedRequest) {
-    return this.documents.listForUser(req.userId!);
+  list(
+    @Req() req: AuthedRequest,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+  ) {
+    return this.documents.listForUser(
+      req.userId!,
+      Math.max(0, Number(skip) || 0),
+      Math.min(50, Math.max(1, Number(take) || 10)),
+    );
   }
 
   /** A single document (public by id — shareable link). */
