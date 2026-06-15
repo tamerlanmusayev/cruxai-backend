@@ -12,7 +12,8 @@ import {
 } from './ai.types';
 
 // Keep input within a safe context budget (chars, not tokens — rough cap).
-const MAX_INPUT_CHARS = 360_000;
+// Lower cap = cheaper input; a chapter fits comfortably.
+const MAX_INPUT_CHARS = 120_000;
 
 // Supported output languages.
 const LANG_NAMES: Record<string, string> = {
@@ -32,9 +33,10 @@ export class AiService {
     apiKey: process.env.ANTHROPIC_API_KEY,
   });
 
-  private readonly modelSummary = process.env.MODEL_SUMMARY ?? 'claude-opus-4-8';
-  private readonly modelQuiz = process.env.MODEL_QUIZ ?? 'claude-opus-4-8';
-  private readonly modelGrade = process.env.MODEL_GRADE ?? 'claude-sonnet-4-6';
+  // Cost-tuned defaults: Sonnet for the flagship summary, Haiku for the rest.
+  private readonly modelSummary = process.env.MODEL_SUMMARY ?? 'claude-sonnet-4-6';
+  private readonly modelQuiz = process.env.MODEL_QUIZ ?? 'claude-haiku-4-5';
+  private readonly modelGrade = process.env.MODEL_GRADE ?? 'claude-haiku-4-5';
 
   /**
    * Force structured output via a single tool. Claude must call the tool,
@@ -96,7 +98,7 @@ export class AiService {
 
     const result = await this.structured<SummaryResult>({
       model: this.modelSummary,
-      maxTokens: 8192,
+      maxTokens: 4096,
       system:
         'You are an expert tutor who distills long books and textbooks into ' +
         'clear, concise study summaries for students. ' +
@@ -169,7 +171,7 @@ export class AiService {
       : '';
     const result = await this.structured<QuizResult>({
       model: this.modelQuiz,
-      maxTokens: 8192,
+      maxTokens: 4096,
       system:
         'You are a teacher who writes fair multiple-choice questions that test ' +
         `real understanding. Write everything in this language: ${language}.`,

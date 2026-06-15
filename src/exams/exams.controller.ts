@@ -10,6 +10,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ExamsService } from './exams.service';
 import { SubmitAttemptDto } from '../attempts/dto/submit-attempt.dto';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
+import { GenerationLimitGuard } from '../usage/generation-limit.guard';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -24,6 +25,7 @@ export class ExamsController {
 
   /** "New exam" — generate a fresh one. Costs money → max 2/min. */
   @Post('documents/:id/exams/new')
+  @UseGuards(GenerationLimitGuard)
   @Throttle({ default: { limit: 2, ttl: 60_000 } })
   createNew(@Req() req: AuthedRequest, @Param('id') id: string) {
     return this.exams.create(id, req.userId!, true);

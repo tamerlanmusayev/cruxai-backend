@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { UsageModule } from './usage/usage.module';
 import { StorageModule } from './storage/storage.module';
 import { QueueModule } from './queue/queue.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -26,6 +27,7 @@ import { StatsModule } from './stats/stats.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     PrismaModule,
     RealtimeModule,
+    UsageModule,
     StorageModule,
     QueueModule,
     ReviewsModule,

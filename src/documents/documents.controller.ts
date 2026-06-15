@@ -15,6 +15,7 @@ import { UpdateSummaryDto } from './dto/update-summary.dto';
 import { CreateDocumentDto, RequestUploadsDto } from './dto/upload.dto';
 import { RecaptchaGuard } from '../security/recaptcha.guard';
 import { AuthedRequest, JwtAuthGuard } from '../auth/jwt.guard';
+import { GenerationLimitGuard } from '../usage/generation-limit.guard';
 
 @Controller('documents')
 export class DocumentsController {
@@ -30,7 +31,7 @@ export class DocumentsController {
 
   /** Step 2 — create the document from uploaded keys; processing is queued. */
   @Post()
-  @UseGuards(JwtAuthGuard, RecaptchaGuard)
+  @UseGuards(JwtAuthGuard, RecaptchaGuard, GenerationLimitGuard)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   create(@Req() req: AuthedRequest, @Body() body: CreateDocumentDto) {
     return this.documents.create(body, req.userId);
