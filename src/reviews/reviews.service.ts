@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
+import { DEMO_MODE, DEMO_REVIEWS } from '../stats/demo.util';
 
 @Injectable()
 export class ReviewsService {
@@ -20,6 +21,9 @@ export class ReviewsService {
 
   /** Aggregate rating + the most recent reviews that have a comment. */
   async list() {
+    // DEMO_MODE: synthetic rating for local presentations (off in production).
+    if (DEMO_MODE) return DEMO_REVIEWS;
+
     const [agg, items] = await Promise.all([
       this.prisma.review.aggregate({ _avg: { rating: true }, _count: true }),
       this.prisma.review.findMany({

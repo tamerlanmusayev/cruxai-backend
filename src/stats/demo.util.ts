@@ -115,3 +115,27 @@ export function demoStats(now: number): DemoStats {
     countries: DEMO_COUNTRIES,
   };
 }
+
+// ---- demo reviews (DEMO_MODE only — synthetic, never stored in the DB) ----
+interface DemoReview {
+  id: string;
+  rating: number;
+  comment: string;
+  name: string;
+  createdAt: string;
+}
+
+const DEMO_REVIEW_ITEMS: DemoReview[] = [
+  { id: 'd1', rating: 5, comment: 'İmtahana hazırlaşmaq üçün ən yaxşı alət. Konspektlər çox aydındır!', name: 'Nigar', createdAt: '2026-06-12T09:20:00.000Z' },
+  { id: 'd2', rating: 5, comment: 'Загрузил учебник — через минуту готовый конспект и тест по слабым темам. Огонь.', name: 'Руслан', createdAt: '2026-06-11T17:05:00.000Z' },
+  { id: 'd3', rating: 5, comment: 'Finally a study tool that actually cites the source. Saved me hours.', name: 'Aydan', createdAt: '2026-06-10T13:40:00.000Z' },
+  { id: 'd4', rating: 4, comment: 'Çox faydalıdır, audio funksiyası da əladır. Bəzən böyük PDF-lər yavaş işlənir.', name: 'Elvin', createdAt: '2026-06-09T20:15:00.000Z' },
+  { id: 'd5', rating: 5, comment: 'Карточки с интервальным повторением — то, чего мне не хватало. Спасибо!', name: 'Камила', createdAt: '2026-06-08T08:50:00.000Z' },
+  { id: 'd6', rating: 5, comment: 'Free and open source, works in Azerbaijani too. Recommended to my whole group.', name: 'Tural', createdAt: '2026-06-06T11:30:00.000Z' },
+];
+
+export const DEMO_REVIEWS = {
+  average: 4.8,
+  count: 128,
+  items: DEMO_REVIEW_ITEMS,
+};
