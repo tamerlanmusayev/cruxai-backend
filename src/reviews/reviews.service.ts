@@ -2,9 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { DEMO_MODE, DEMO_REVIEWS } from '../stats/demo.util';
+import { TtlCache } from '../common/ttl-cache';
 
 @Injectable()
 export class ReviewsService {
+  private readonly cache = new TtlCache<unknown>(15_000);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateReviewDto, userId?: string) {
@@ -23,7 +26,10 @@ export class ReviewsService {
   async list() {
     // DEMO_MODE: synthetic rating for local presentations (off in production).
     if (DEMO_MODE) return DEMO_REVIEWS;
+    return this.cache.wrap('list', () => this.computeList());
+  }
 
+  private async computeList() {
     const [agg, items] = await Promise.all([
       this.prisma.review.aggregate({ _avg: { rating: true }, _count: true }),
       this.prisma.review.findMany({

@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DEMO_MODE, demoStats } from './demo.util';
+import { TtlCache } from '../common/ttl-cache';
 
 interface DayCount {
   day: string;
@@ -10,6 +11,10 @@ interface DayCount {
 
 @Controller('stats')
 export class StatsController {
+  // The aggregate is polled every 15s by every visitor — cache it for 10s so
+  // the DB sees one query burst per 10s instead of one per visitor.
+  private readonly cache = new TtlCache<Record<string, unknown>>(10_000);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly presence: RealtimeGateway,
@@ -18,6 +23,11 @@ export class StatsController {
   /** Public, aggregate-only metrics — all real (no fabricated numbers). */
   @Get()
   async get() {
+    // `online` is always live; the heavy DB aggregate is cached.
+    return { online: this.presence.getOnline(), ...(await this.cache.wrap('agg', () => this.aggregate())) };
+  }
+
+  private async aggregate(): Promise<Record<string, unknown>> {
     const [documents, summaries, quizzes, attempts, languages, daily, monthly, today] =
       await Promise.all([
         this.prisma.document.count(),
@@ -55,7 +65,6 @@ export class StatsController {
     if (DEMO_MODE) {
       const d = demoStats(Date.now());
       return {
-        online: this.presence.getOnline(),
         documents: documents + d.documents,
         summaries: summaries + d.summaries,
         quizzes: quizzes + d.quizzes,
@@ -70,7 +79,6 @@ export class StatsController {
     }
 
     return {
-      online: this.presence.getOnline(),
       documents,
       summaries,
       quizzes,

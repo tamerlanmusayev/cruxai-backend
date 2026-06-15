@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../ai/ai.service';
+import { TtlCache } from '../common/ttl-cache';
 
 const GUTENDEX = process.env.GUTENDEX_URL ?? 'https://gutendex.com/books';
 
@@ -34,6 +35,7 @@ interface GutendexBook {
 export class BooksService {
   private readonly log = new Logger(BooksService.name);
   private cachedCount = 0;
+  private readonly searchCache = new TtlCache<BookHit[]>(5 * 60_000);
 
   constructor(private readonly ai: AiService) {}
 
@@ -63,7 +65,12 @@ export class BooksService {
   }
 
   async search(q: string): Promise<BookHit[]> {
-    if (!q.trim()) return [];
+    const term = q.trim();
+    if (!term) return [];
+    return this.searchCache.wrap(term.toLowerCase(), () => this.runSearch(term));
+  }
+
+  private async runSearch(q: string): Promise<BookHit[]> {
     const res = await fetch(`${GUTENDEX}?search=${encodeURIComponent(q)}`);
     if (!res.ok) throw new Error(`Book search failed (${res.status})`);
     const data = (await res.json()) as { count: number; results: GutendexBook[] };
