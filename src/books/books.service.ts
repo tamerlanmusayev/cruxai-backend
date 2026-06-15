@@ -67,13 +67,48 @@ export class BooksService {
     const res = await fetch(`${GUTENDEX}?search=${encodeURIComponent(q)}`);
     if (!res.ok) throw new Error(`Book search failed (${res.status})`);
     const data = (await res.json()) as { count: number; results: GutendexBook[] };
-    return data.results.slice(0, 12).map((b) => ({
+    const free: BookHit[] = data.results.slice(0, 12).map((b) => ({
       id: b.id,
       title: b.title,
       author: b.authors[0]?.name ?? 'Unknown',
       cover: pick(b.formats, 'image/jpeg'),
       textUrl: pickText(b.formats),
     }));
+
+    // Fill with broader discovery from Open Library (metadata/covers for
+    // almost any book; no free full text, so those need an upload).
+    const seen = new Set(free.map((b) => b.title.toLowerCase()));
+    const more = (await this.searchOpenLibrary(q)).filter(
+      (b) => !seen.has(b.title.toLowerCase()),
+    );
+    return [...free, ...more].slice(0, 18);
+  }
+
+  private async searchOpenLibrary(q: string): Promise<BookHit[]> {
+    try {
+      const res = await fetch(
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}` +
+          `&limit=12&fields=key,title,author_name,cover_i`,
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        docs: { key: string; title: string; author_name?: string[]; cover_i?: number }[];
+      };
+      return data.docs
+        .filter((d) => d.title)
+        .map((d, i) => ({
+          id: 10_000_000 + (d.cover_i ?? i),
+          title: d.title,
+          author: d.author_name?.[0] ?? 'Unknown',
+          cover: d.cover_i
+            ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`
+            : null,
+          textUrl: null,
+        }));
+    } catch (e) {
+      this.log.warn(`Open Library search failed: ${e}`);
+      return [];
+    }
   }
 
   /** Total catalogue size (for the "X+ books" claim). */
