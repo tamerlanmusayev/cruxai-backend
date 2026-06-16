@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,6 +13,7 @@ export class AuthService {
   private readonly log = new Logger(AuthService.name);
   private readonly googleClientId = process.env.GOOGLE_CLIENT_ID ?? '';
   private readonly google = new OAuth2Client(this.googleClientId);
+  private readonly telegramBotToken = process.env.TELEGRAM_BOT_TOKEN ?? '';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -79,6 +80,64 @@ export class AuthService {
       userId: user.id,
       user: { email: user.email, name: user.name, picture: user.picture },
     };
+  }
+
+  /**
+   * Sign in with Telegram's login widget payload. Verifies the HMAC signature
+   * against the bot token, then find-or-creates the user by Telegram id
+   * (Telegram does not provide an email).
+   */
+  async telegramLogin(data: Record<string, string>, anonToken?: string) {
+    if (!this.telegramBotToken) {
+      throw new UnauthorizedException('Telegram sign-in is not configured');
+    }
+    if (!this.verifyTelegram(data)) {
+      throw new UnauthorizedException('Invalid Telegram signature');
+    }
+    const authDate = Number(data.auth_date) || 0;
+    if (Date.now() / 1000 - authDate > 86_400) {
+      throw new UnauthorizedException('Telegram login expired');
+    }
+    const telegramId = data.id ? String(data.id) : '';
+    if (!telegramId) throw new UnauthorizedException('Missing Telegram id');
+
+    const name =
+      [data.first_name, data.last_name].filter(Boolean).join(' ') ||
+      data.username ||
+      null;
+    const picture = data.photo_url ?? null;
+
+    let user = await this.prisma.user.findUnique({ where: { telegramId } });
+    if (user) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { name, picture },
+      });
+    } else {
+      user = await this.prisma.user.create({ data: { telegramId, name, picture } });
+      await this.adoptAnonymous(anonToken, user.id);
+    }
+
+    const token = await this.jwt.signAsync({ sub: user.id });
+    return {
+      token,
+      userId: user.id,
+      user: { email: user.email, name: user.name, picture: user.picture },
+    };
+  }
+
+  /** Validate the Telegram login widget HMAC (secret = sha256(botToken)). */
+  private verifyTelegram(data: Record<string, string>): boolean {
+    const { hash, ...rest } = data;
+    if (!hash) return false;
+    const checkString = Object.keys(rest)
+      .sort()
+      .map((k) => `${k}=${rest[k]}`)
+      .join('\n');
+    const secret = createHash('sha256').update(this.telegramBotToken).digest();
+    const hmac = createHmac('sha256', secret).update(checkString).digest('hex');
+    if (hmac.length !== hash.length) return false;
+    return timingSafeEqual(Buffer.from(hmac), Buffer.from(hash));
   }
 
   /**
