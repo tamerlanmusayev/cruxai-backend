@@ -50,7 +50,7 @@ export class ExamsService {
     }
 
     const source = await this.sourceText(documentId, doc.text);
-    this.usage.consume(userId, 'exam');
+    await this.usage.consume(userId, 'exam');
     const questions = await this.ai.makeQuiz(
       doc.title,
       source,

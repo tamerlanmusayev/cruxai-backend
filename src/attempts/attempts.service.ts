@@ -32,7 +32,7 @@ export class AttemptsService {
       0,
     );
 
-    this.usage.consume(userId, 'grade');
+    await this.usage.consume(userId, 'grade');
     const grade = await this.ai.grade(
       questions,
       answers,

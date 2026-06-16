@@ -52,7 +52,7 @@ export class BooksService {
     lang?: string,
     userId?: string,
   ): Promise<BookRecommendation[]> {
-    if (userId) this.usage.consume(userId, 'recommend');
+    if (userId) await this.usage.consume(userId, 'recommend');
     const recs = await this.ai.recommendBooks(topic, lang);
     return Promise.all(
       recs.map(async (r) => {

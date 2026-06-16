@@ -35,6 +35,15 @@ model User {
   attempts  Attempt[]
 }
 
+// Daily AI-token spend per user (and a '__global__' row for the platform cap).
+// Persisted so the budget survives restarts and works across API instances.
+model UsageCounter {
+  userId String
+  day    String // 'YYYY-MM-DD' (UTC)
+  tokens Int    @default(0)
+  @@id([userId, day])
+}
+
 model Exam {
   id          String   @id @default(cuid())
   userId      String

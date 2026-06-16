@@ -38,7 +38,7 @@ export class FlashcardsService {
       where: { documentId },
       select: { contentMd: true },
     });
-    this.usage.consume(userId, 'flashcards');
+    await this.usage.consume(userId, 'flashcards');
     const drafts = await this.ai.makeFlashcards(
       doc.title,
       summary?.contentMd ?? doc.text,

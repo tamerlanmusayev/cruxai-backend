@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Estimated token cost (input + output, rounded) of each AI operation.
@@ -28,12 +29,14 @@ export const FULL_FLOW_TOKENS =
   TOKEN_COST.exam +
   TOKEN_COST.grade; // ≈ 84k
 
+const GLOBAL_KEY = '__global__';
+
 /**
- * In-memory daily AI-token budget to protect against runaway spend.
- * Per-user cap defaults to 3× a full flow (~3 documents/day); the global cap
- * is a kill-switch for the whole platform. Counters reset at UTC midnight.
- * (In-memory is intentional — a safety cap, not billing-grade accounting;
- * resets on restart, which is acceptable for a cost guard.)
+ * Daily AI-token budget to protect against runaway spend, persisted in Postgres
+ * (`UsageCounter`) so it survives restarts and is shared across API instances.
+ * Per-user cap defaults to 3× a full flow (~3 documents/day); a '__global__'
+ * row is the platform-wide kill-switch. Counters are keyed by UTC day, so they
+ * naturally reset at midnight (old rows are harmless and can be pruned later).
  */
 @Injectable()
 export class UsageService {
@@ -43,55 +46,80 @@ export class UsageService {
   private readonly globalCap =
     Number(process.env.GLOBAL_DAILY_TOKEN_CAP) || 10_000_000;
 
-  private day = '';
-  private global = 0;
-  private perUser = new Map<string, number>();
+  constructor(private readonly prisma: PrismaService) {}
 
-  private roll(today: string) {
-    if (today !== this.day) {
-      this.day = today;
-      this.global = 0;
-      this.perUser.clear();
-    }
+  private today(): string {
+    return new Date().toISOString().slice(0, 10);
   }
 
   /**
-   * Reserve `tokens` for an AI operation by `kind`. Throws 429 if it would
-   * blow the per-user or global daily budget; otherwise records the spend.
-   * Call this immediately BEFORE the actual AI call (only when it really runs,
-   * i.e. not on cache hits).
+   * Reserve `tokens` for an AI operation by `kind`. Atomically increments the
+   * per-user and global day counters, then throws 429 (and refunds) if either
+   * cap is exceeded. Call immediately BEFORE the real AI call (not on cache
+   * hits). Atomic increments make this safe across concurrent requests.
    */
-  consume(userId: string, kind: GenKind): void {
+  async consume(userId: string, kind: GenKind): Promise<void> {
     const tokens = TOKEN_COST[kind];
-    this.roll(new Date().toISOString().slice(0, 10));
+    const day = this.today();
 
-    if (this.global + tokens > this.globalCap) {
-      this.log.warn(`Global daily token cap (${this.globalCap}) reached`);
-      throw new HttpException(
-        'The service has reached today’s capacity. Please try again tomorrow.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    const used = this.perUser.get(userId) ?? 0;
-    if (used + tokens > this.userCap) {
+    const [u, g] = await this.prisma.$transaction([
+      this.prisma.usageCounter.upsert({
+        where: { userId_day: { userId, day } },
+        create: { userId, day, tokens },
+        update: { tokens: { increment: tokens } },
+        select: { tokens: true },
+      }),
+      this.prisma.usageCounter.upsert({
+        where: { userId_day: { userId: GLOBAL_KEY, day } },
+        create: { userId: GLOBAL_KEY, day, tokens },
+        update: { tokens: { increment: tokens } },
+        select: { tokens: true },
+      }),
+    ]);
+
+    const overGlobal = g.tokens > this.globalCap;
+    const overUser = u.tokens > this.userCap;
+    if (overGlobal || overUser) {
+      // Refund this reservation so a rejected call doesn't burn budget.
+      await this.prisma
+        .$transaction([
+          this.prisma.usageCounter.update({
+            where: { userId_day: { userId, day } },
+            data: { tokens: { decrement: tokens } },
+          }),
+          this.prisma.usageCounter.update({
+            where: { userId_day: { userId: GLOBAL_KEY, day } },
+            data: { tokens: { decrement: tokens } },
+          }),
+        ])
+        .catch(() => undefined);
+
+      if (overGlobal) {
+        this.log.warn(`Global daily token cap (${this.globalCap}) reached`);
+        throw new HttpException(
+          'The service has reached today’s capacity. Please try again tomorrow.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
       throw new HttpException(
         'You’ve used today’s free AI budget. It resets at midnight (UTC).',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    this.global += tokens;
-    this.perUser.set(userId, used + tokens);
   }
 
   /** Read the remaining token budget for a user (no consumption). */
-  status(userId: string): {
+  async status(userId: string): Promise<{
     used: number;
     limit: number;
     remaining: number;
     fullFlow: number;
-  } {
-    this.roll(new Date().toISOString().slice(0, 10));
-    const used = this.perUser.get(userId) ?? 0;
+  }> {
+    const row = await this.prisma.usageCounter.findUnique({
+      where: { userId_day: { userId, day: this.today() } },
+      select: { tokens: true },
+    });
+    const used = row?.tokens ?? 0;
     return {
       used,
       limit: this.userCap,

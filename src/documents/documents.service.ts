@@ -39,7 +39,7 @@ export class DocumentsService {
       ? lang
       : undefined;
     // Charge the budget before creating the doc so a 429 reaches the client.
-    if (userId) this.usage.consume(userId, 'overview');
+    if (userId) await this.usage.consume(userId, 'overview');
     const doc = await this.prisma.document.create({
       data: { title: title.slice(0, 200) || 'Book', status: 'PROCESSING', userId, language },
       select: { id: true, title: true, status: true, createdAt: true },
@@ -105,7 +105,7 @@ export class DocumentsService {
 
     // Charge the (heavy) summary cost up front so an over-budget user is
     // rejected immediately instead of queueing a doc that can't be processed.
-    if (userId) this.usage.consume(userId, 'summary');
+    if (userId) await this.usage.consume(userId, 'summary');
 
     const doc = await this.prisma.document.create({
       data: {

@@ -36,7 +36,7 @@ export class ConceptsService {
       where: { documentId },
       select: { contentMd: true },
     });
-    this.usage.consume(userId, 'graph');
+    await this.usage.consume(userId, 'graph');
     const { concepts, edges } = await this.ai.extractConcepts(
       doc.title,
       summary?.contentMd ?? doc.text,

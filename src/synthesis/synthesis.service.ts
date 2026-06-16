@@ -23,7 +23,7 @@ export class SynthesisService {
     if (docs.length < 2) {
       throw new BadRequestException('Need at least 2 ready documents you own');
     }
-    this.usage.consume(userId, 'synthesis');
+    await this.usage.consume(userId, 'synthesis');
     return this.ai.synthesize(
       docs.map((d) => ({ title: d.title, text: d.text })),
       query,
