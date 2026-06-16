@@ -14,6 +14,7 @@ export const TOKEN_COST = {
   exam: 12_000, // generate a timed exam
   synthesis: 12_000, // compare 2–5 documents
   grade: 4_000, // grade a quiz attempt + explanations
+  recommend: 4_000, // AI reading-list recommendation
 } as const;
 
 export type GenKind = keyof typeof TOKEN_COST;

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiService } from '../ai/ai.service';
 import { TtlCache } from '../common/ttl-cache';
+import { UsageService } from '../usage/usage.service';
 
 const GUTENDEX = process.env.GUTENDEX_URL ?? 'https://gutendex.com/books';
 
@@ -37,13 +38,21 @@ export class BooksService {
   private cachedCount = 0;
   private readonly searchCache = new TtlCache<BookHit[]>(5 * 60_000);
 
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly usage: UsageService,
+  ) {}
 
   /**
    * AI-curated reading list for a goal/topic, with a free full-text link
    * attached when a public-domain match exists in the catalogue.
    */
-  async recommend(topic: string, lang?: string): Promise<BookRecommendation[]> {
+  async recommend(
+    topic: string,
+    lang?: string,
+    userId?: string,
+  ): Promise<BookRecommendation[]> {
+    if (userId) this.usage.consume(userId, 'recommend');
     const recs = await this.ai.recommendBooks(topic, lang);
     return Promise.all(
       recs.map(async (r) => {
