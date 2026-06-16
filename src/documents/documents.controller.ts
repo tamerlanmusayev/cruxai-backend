@@ -60,6 +60,13 @@ export class DocumentsController {
     );
   }
 
+  /** Curated public sample documents for the home page (no auth).
+   * Declared before ':id' so the literal path isn't captured as an id. */
+  @Get('examples')
+  examples() {
+    return this.documents.listExamples();
+  }
+
   /** A single document (public by id — shareable link). */
   @Get(':id')
   findOne(@Param('id') id: string) {

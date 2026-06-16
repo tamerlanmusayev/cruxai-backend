@@ -30,12 +30,12 @@ export class StatsController {
   private async aggregate(): Promise<Record<string, unknown>> {
     const [documents, summaries, quizzes, attempts, languages, daily, monthly, today] =
       await Promise.all([
-        this.prisma.document.count(),
+        this.prisma.document.count({ where: { isExample: false } }),
         this.prisma.summary.count(),
         this.prisma.quiz.count(),
         this.prisma.attempt.count(),
         this.prisma.document.findMany({
-          where: { language: { not: null } },
+          where: { language: { not: null }, isExample: false },
           distinct: ['language'],
           select: { language: true },
         }),

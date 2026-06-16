@@ -56,6 +56,7 @@ model Document {
   text      String      @default("") // extracted text; filled by the worker after ingest
   language  String?    // detected/target language (e.g. "ru", "en", "az")
   status     DocStatus   @default(PROCESSING)
+  isExample  Boolean     @default(false) // curated public sample (seed script); shown on home, excluded from user libraries & stats
   error      String?
   sources    Json?       // [{ key, name }] — uploaded object keys the worker fetches
   skipped    Json?       // [{ name, reason }] — files skipped during ingest

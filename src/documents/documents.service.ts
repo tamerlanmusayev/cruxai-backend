@@ -123,10 +123,10 @@ export class DocumentsService {
     return doc;
   }
 
-  /** A user's library — most recent first, paginated. */
+  /** A user's library — most recent first, paginated (curated examples excluded). */
   async listForUser(userId: string, skip = 0, take = 10) {
     return this.prisma.document.findMany({
-      where: { userId },
+      where: { userId, isExample: false },
       orderBy: { createdAt: 'desc' },
       skip,
       take,
@@ -137,6 +137,16 @@ export class DocumentsService {
         language: true,
         createdAt: true,
       },
+    });
+  }
+
+  /** Curated public sample documents shown on the home page (no auth). */
+  async listExamples() {
+    return this.prisma.document.findMany({
+      where: { isExample: true, status: 'READY' },
+      orderBy: { createdAt: 'asc' },
+      take: 6,
+      select: { id: true, title: true, language: true },
     });
   }
 

@@ -9,7 +9,8 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "seed:examples": "node dist/scripts/seed-examples.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
