@@ -158,6 +158,7 @@ export class DocumentsService {
         title: true,
         status: true,
         language: true,
+        isExample: true,
         error: true,
         skipped: true,
         createdAt: true,
