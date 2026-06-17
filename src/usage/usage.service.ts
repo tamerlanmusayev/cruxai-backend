@@ -1,4 +1,10 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -39,14 +45,36 @@ const GLOBAL_KEY = '__global__';
  * naturally reset at midnight (old rows are harmless and can be pruned later).
  */
 @Injectable()
-export class UsageService {
+export class UsageService implements OnModuleInit {
   private readonly log = new Logger(UsageService.name);
   private readonly userCap =
     Number(process.env.USER_DAILY_TOKEN_CAP) || 3 * FULL_FLOW_TOKENS;
   private readonly globalCap =
     Number(process.env.GLOBAL_DAILY_TOKEN_CAP) || 10_000_000;
+  private static readonly KEEP_DAYS = 7;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Prune counters older than KEEP_DAYS on boot, then once a day. */
+  onModuleInit(): void {
+    void this.pruneOld();
+    const timer = setInterval(() => void this.pruneOld(), 24 * 60 * 60 * 1000);
+    timer.unref?.(); // don't keep the process alive just for cleanup
+  }
+
+  private async pruneOld(): Promise<void> {
+    const cutoff = new Date(Date.now() - UsageService.KEEP_DAYS * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    try {
+      const { count } = await this.prisma.usageCounter.deleteMany({
+        where: { day: { lt: cutoff } },
+      });
+      if (count) this.log.log(`Pruned ${count} old usage counter row(s)`);
+    } catch (e) {
+      this.log.warn(`Usage prune failed: ${(e as Error).message}`);
+    }
+  }
 
   private today(): string {
     return new Date().toISOString().slice(0, 10);
