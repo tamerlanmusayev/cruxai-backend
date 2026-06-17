@@ -4,7 +4,12 @@ import { assign, createMachine, interpret, StateMachine } from 'xstate';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiService } from '../../ai/ai.service';
 import { StorageService } from '../../storage/storage.service';
-import { extractFiles, IncomingFile } from '../extract.util';
+import {
+  extractFiles,
+  IncomingFile,
+  MAX_FILE_BYTES,
+  MAX_TOTAL_BYTES,
+} from '../extract.util';
 import { chunkText } from '../chunk.util';
 import { friendlyError } from '../friendly-error.util';
 import {
@@ -185,12 +190,27 @@ export class ProcessDocumentMachine {
   }
 
   private async fetchBytes(ctx: ProcessDocumentContext): Promise<IncomingFile[]> {
-    return Promise.all(
+    const files = await Promise.all(
       ctx.sources.map(async (s) => {
         const buffer = s.url ? await this.fetchRemote(s.url) : await this.storage.get(s.key!);
+        // Re-check actual bytes server-side — the presign step trusts the
+        // client-declared size, and S3 presigned PUTs don't enforce a size,
+        // so this is the real per-file guard (bounds extract + AI cost).
+        if (buffer.length > MAX_FILE_BYTES) {
+          throw new Error(
+            `"${nameFor(s)}" is too large (max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB per file).`,
+          );
+        }
         return { originalname: nameFor(s), mimetype: '', buffer, size: buffer.length };
       }),
     );
+    const total = files.reduce((sum, f) => sum + f.size, 0);
+    if (total > MAX_TOTAL_BYTES) {
+      throw new Error(
+        `Files exceed the ${Math.round(MAX_TOTAL_BYTES / 1024 / 1024)} MB total limit.`,
+      );
+    }
+    return files;
   }
 
   private async runExtract(ctx: ProcessDocumentContext) {

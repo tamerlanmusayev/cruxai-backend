@@ -7,21 +7,27 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Read a positive integer cost from env, falling back to the default. */
+const cost = (key: string, def: number): number => {
+  const v = Number(process.env[key]);
+  return Number.isFinite(v) && v > 0 ? v : def;
+};
+
 /**
  * Estimated token cost (input + output, rounded) of each AI operation.
- * These are deliberate over-estimates used for an internal daily budget —
- * a cost guard, not exact Anthropic billing.
+ * Deliberate over-estimates for an internal budget (a cost guard, not exact
+ * Anthropic billing). Each is overridable via env `TOKEN_COST_<KIND>`.
  */
 export const TOKEN_COST = {
-  summary: 40_000, // upload → summarize the document (the heavy one)
-  overview: 6_000, // AI overview of a copyrighted book (no big input)
-  quiz: 12_000, // generate / refresh a quiz
-  flashcards: 8_000, // generate a flashcard deck
-  graph: 8_000, // extract the knowledge graph
-  exam: 12_000, // generate a timed exam
-  synthesis: 12_000, // compare 2–5 documents
-  grade: 4_000, // grade a quiz attempt + explanations
-  recommend: 4_000, // AI reading-list recommendation
+  summary: cost('TOKEN_COST_SUMMARY', 40_000), // upload → summarize (the heavy one)
+  overview: cost('TOKEN_COST_OVERVIEW', 6_000), // AI overview of a copyrighted book
+  quiz: cost('TOKEN_COST_QUIZ', 12_000), // generate / refresh a quiz
+  flashcards: cost('TOKEN_COST_FLASHCARDS', 8_000), // flashcard deck
+  graph: cost('TOKEN_COST_GRAPH', 8_000), // knowledge graph
+  exam: cost('TOKEN_COST_EXAM', 12_000), // timed exam
+  synthesis: cost('TOKEN_COST_SYNTHESIS', 12_000), // compare 2–5 documents
+  grade: cost('TOKEN_COST_GRADE', 4_000), // grade a quiz attempt
+  recommend: cost('TOKEN_COST_RECOMMEND', 4_000), // AI reading list
 } as const;
 
 export type GenKind = keyof typeof TOKEN_COST;
@@ -98,6 +104,11 @@ export class UsageService implements OnModuleInit {
           THEN ${tokens} ELSE "UsageWindow"."tokens" + ${tokens} END
       RETURNING "tokens", "windowStart";`;
     return rows[0];
+  }
+
+  /** Public config: per-operation token estimates + one full-flow total. */
+  config(): { costs: Record<GenKind, number>; fullFlow: number; userLimit: number } {
+    return { costs: { ...TOKEN_COST }, fullFlow: FULL_FLOW_TOKENS, userLimit: this.userCap };
   }
 
   private async refund(userId: string, tokens: number): Promise<void> {

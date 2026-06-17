@@ -25,7 +25,16 @@ export class ProcessingService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // Scale: ROLE=api serves HTTP only (enqueues but doesn't consume); ROLE=worker
+    // consumes the queue; 'all' (default) does both. Deploy api + worker as two
+    // instances from the same image with different ROLE.
+    const role = (process.env.ROLE ?? 'all').toLowerCase();
+    if (role !== 'all' && role !== 'worker') {
+      this.log.log(`ROLE=${role}: document worker disabled on this instance`);
+      return;
+    }
     await this.queue.work<ProcessJob>(PROCESS_QUEUE, (d) => this.run(d.documentId));
+    this.log.log(`ROLE=${role}: document worker listening`);
   }
 
   async run(documentId: string): Promise<void> {

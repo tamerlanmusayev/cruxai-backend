@@ -3,6 +3,7 @@ import * as mammoth from 'mammoth';
 
 /** Limits — keep processing fast and within the model context budget. */
 export const MAX_TOTAL_BYTES = 40 * 1024 * 1024; // 40 MB across all files
+export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB per single file
 export const MAX_FILES = 20;
 export const MAX_PDF_PAGES = 300;
 export const MAX_TOTAL_CHARS = 600_000; // combined text cap

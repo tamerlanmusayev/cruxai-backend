@@ -12,6 +12,7 @@ import { UsageService } from '../usage/usage.service';
 import { friendlyError } from './friendly-error.util';
 import {
   MAX_FILES,
+  MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
   SUPPORTED_EXTENSIONS,
   extOf,
@@ -76,6 +77,11 @@ export class DocumentsService {
         if (!SUPPORTED_EXTENSIONS.includes(extOf(f.name))) {
           throw new ForbiddenException(
             `"${f.name}": unsupported format. Use PDF, DOCX, TXT or MD.`,
+          );
+        }
+        if (f.size > MAX_FILE_BYTES) {
+          throw new ForbiddenException(
+            `"${f.name}" is too large (max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB per file).`,
           );
         }
         const key = this.storage.newKey(f.name);
