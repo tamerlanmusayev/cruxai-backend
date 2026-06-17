@@ -36,13 +36,19 @@ export const FULL_FLOW_TOKENS =
   TOKEN_COST.grade; // ≈ 84k
 
 const GLOBAL_KEY = '__global__';
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+
+interface WindowRow {
+  tokens: number;
+  windowStart: Date;
+}
 
 /**
- * Daily AI-token budget to protect against runaway spend, persisted in Postgres
- * (`UsageCounter`) so it survives restarts and is shared across API instances.
- * Per-user cap defaults to 3× a full flow (~3 documents/day); a '__global__'
- * row is the platform-wide kill-switch. Counters are keyed by UTC day, so they
- * naturally reset at midnight (old rows are harmless and can be pruned later).
+ * AI-token budget as a ROLLING 24h window per user, persisted in Postgres
+ * (`UsageWindow`) so it survives restarts and is shared across API instances.
+ * The window starts on the user's first spend and resets exactly 24h later —
+ * each user has their own reset clock (not a shared UTC midnight). A
+ * '__global__' row is the platform-wide rolling kill-switch.
  */
 @Injectable()
 export class UsageService implements OnModuleInit {
@@ -55,104 +61,104 @@ export class UsageService implements OnModuleInit {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Prune counters older than KEEP_DAYS on boot, then once a day. */
+  /** Prune windows untouched for KEEP_DAYS on boot, then once a day. */
   onModuleInit(): void {
     void this.pruneOld();
-    const timer = setInterval(() => void this.pruneOld(), 24 * 60 * 60 * 1000);
+    const timer = setInterval(() => void this.pruneOld(), WINDOW_MS);
     timer.unref?.(); // don't keep the process alive just for cleanup
   }
 
   private async pruneOld(): Promise<void> {
-    const cutoff = new Date(Date.now() - UsageService.KEEP_DAYS * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    const cutoff = new Date(Date.now() - UsageService.KEEP_DAYS * WINDOW_MS);
     try {
-      const { count } = await this.prisma.usageCounter.deleteMany({
-        where: { day: { lt: cutoff } },
+      const { count } = await this.prisma.usageWindow.deleteMany({
+        where: { windowStart: { lt: cutoff } },
       });
-      if (count) this.log.log(`Pruned ${count} old usage counter row(s)`);
+      if (count) this.log.log(`Pruned ${count} stale usage window(s)`);
     } catch (e) {
       this.log.warn(`Usage prune failed: ${(e as Error).message}`);
     }
   }
 
-  private today(): string {
-    return new Date().toISOString().slice(0, 10);
+  /**
+   * Add `tokens` to a rolling window in one atomic statement: if the existing
+   * window is older than 24h it restarts at now() with just these tokens,
+   * otherwise it increments. Returns the resulting total + window start.
+   */
+  private async bump(userId: string, tokens: number): Promise<WindowRow> {
+    const rows = await this.prisma.$queryRaw<WindowRow[]>`
+      INSERT INTO "UsageWindow" ("userId", "windowStart", "tokens")
+      VALUES (${userId}, now(), ${tokens})
+      ON CONFLICT ("userId") DO UPDATE SET
+        "windowStart" = CASE
+          WHEN "UsageWindow"."windowStart" < now() - interval '24 hours'
+          THEN now() ELSE "UsageWindow"."windowStart" END,
+        "tokens" = CASE
+          WHEN "UsageWindow"."windowStart" < now() - interval '24 hours'
+          THEN ${tokens} ELSE "UsageWindow"."tokens" + ${tokens} END
+      RETURNING "tokens", "windowStart";`;
+    return rows[0];
+  }
+
+  private async refund(userId: string, tokens: number): Promise<void> {
+    await this.prisma.usageWindow
+      .update({ where: { userId }, data: { tokens: { decrement: tokens } } })
+      .catch(() => undefined);
   }
 
   /**
-   * Reserve `tokens` for an AI operation by `kind`. Atomically increments the
-   * per-user and global day counters, then throws 429 (and refunds) if either
-   * cap is exceeded. Call immediately BEFORE the real AI call (not on cache
-   * hits). Atomic increments make this safe across concurrent requests.
+   * Reserve `tokens` for an AI operation by `kind`. Bumps the per-user and
+   * global rolling windows, then throws 429 (and refunds) if either cap is
+   * exceeded. Call immediately BEFORE the real AI call (not on cache hits).
    */
   async consume(userId: string, kind: GenKind): Promise<void> {
     const tokens = TOKEN_COST[kind];
-    const day = this.today();
-
-    const [u, g] = await this.prisma.$transaction([
-      this.prisma.usageCounter.upsert({
-        where: { userId_day: { userId, day } },
-        create: { userId, day, tokens },
-        update: { tokens: { increment: tokens } },
-        select: { tokens: true },
-      }),
-      this.prisma.usageCounter.upsert({
-        where: { userId_day: { userId: GLOBAL_KEY, day } },
-        create: { userId: GLOBAL_KEY, day, tokens },
-        update: { tokens: { increment: tokens } },
-        select: { tokens: true },
-      }),
-    ]);
+    const u = await this.bump(userId, tokens);
+    const g = await this.bump(GLOBAL_KEY, tokens);
 
     const overGlobal = g.tokens > this.globalCap;
     const overUser = u.tokens > this.userCap;
     if (overGlobal || overUser) {
-      // Refund this reservation so a rejected call doesn't burn budget.
-      await this.prisma
-        .$transaction([
-          this.prisma.usageCounter.update({
-            where: { userId_day: { userId, day } },
-            data: { tokens: { decrement: tokens } },
-          }),
-          this.prisma.usageCounter.update({
-            where: { userId_day: { userId: GLOBAL_KEY, day } },
-            data: { tokens: { decrement: tokens } },
-          }),
-        ])
-        .catch(() => undefined);
+      await this.refund(userId, tokens);
+      await this.refund(GLOBAL_KEY, tokens);
 
       if (overGlobal) {
         this.log.warn(`Global daily token cap (${this.globalCap}) reached`);
         throw new HttpException(
-          'The service has reached today’s capacity. Please try again tomorrow.',
+          'The service has reached today’s capacity. Please try again later.',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
       throw new HttpException(
-        'You’ve used today’s free AI budget. It resets at midnight (UTC).',
+        'You’ve used your free AI budget. It refills 24h after you started.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
   }
 
-  /** Read the remaining token budget for a user (no consumption). */
+  /**
+   * Remaining token budget for a user (no consumption). `resetsAt` is when the
+   * current window refills (null if the user hasn't spent anything yet, or the
+   * previous window already lapsed → full budget available now).
+   */
   async status(userId: string): Promise<{
     used: number;
     limit: number;
     remaining: number;
     fullFlow: number;
+    resetsAt: string | null;
   }> {
-    const row = await this.prisma.usageCounter.findUnique({
-      where: { userId_day: { userId, day: this.today() } },
-      select: { tokens: true },
-    });
-    const used = row?.tokens ?? 0;
+    const row = await this.prisma.usageWindow.findUnique({ where: { userId } });
+    const active = row && Date.now() - row.windowStart.getTime() < WINDOW_MS;
+    const used = active ? row!.tokens : 0;
     return {
       used,
       limit: this.userCap,
       remaining: Math.max(0, this.userCap - used),
       fullFlow: FULL_FLOW_TOKENS,
+      resetsAt: active
+        ? new Date(row!.windowStart.getTime() + WINDOW_MS).toISOString()
+        : null,
     };
   }
 }

@@ -35,13 +35,14 @@ model User {
   attempts  Attempt[]
 }
 
-// Daily AI-token spend per user (and a '__global__' row for the platform cap).
+// AI-token spend in a rolling 24h window per user (+ a '__global__' row for the
+// platform cap). The window starts on the user's first spend and resets 24h
+// later — so each user has their own reset time, not a shared UTC midnight.
 // Persisted so the budget survives restarts and works across API instances.
-model UsageCounter {
-  userId String
-  day    String // 'YYYY-MM-DD' (UTC)
-  tokens Int    @default(0)
-  @@id([userId, day])
+model UsageWindow {
+  userId      String   @id
+  windowStart DateTime
+  tokens      Int      @default(0)
 }
 
 model Exam {
