@@ -38,11 +38,12 @@ export class FlashcardsService {
       where: { documentId },
       select: { contentMd: true },
     });
-    await this.usage.consume(userId, 'flashcards');
+    await this.usage.reserve(userId, 'flashcards');
     const drafts = await this.ai.makeFlashcards(
       doc.title,
       summary?.contentMd ?? doc.text,
       doc.language ?? 'en',
+      userId,
     );
     await this.prisma.flashcard.createMany({
       data: drafts.map((d) => ({

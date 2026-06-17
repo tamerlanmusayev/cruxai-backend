@@ -32,11 +32,12 @@ export class AttemptsService {
       0,
     );
 
-    await this.usage.consume(userId, 'grade');
+    await this.usage.reserve(userId, 'grade');
     const grade = await this.ai.grade(
       questions,
       answers,
       quiz.document.language ?? 'en',
+      userId,
     );
 
     const attempt = await this.prisma.attempt.create({

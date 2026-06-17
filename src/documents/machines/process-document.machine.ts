@@ -219,7 +219,7 @@ export class ProcessDocumentMachine {
 
   private async runSummarize(ctx: ProcessDocumentContext) {
     const chunks = chunkText(ctx.text ?? '');
-    return this.ai.summarize(ctx.title ?? 'Untitled', chunks, ctx.langHint);
+    return this.ai.summarize(ctx.title ?? 'Untitled', chunks, ctx.langHint, ctx.userId);
   }
 
   private async persist(ctx: ProcessDocumentContext) {

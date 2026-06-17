@@ -36,11 +36,12 @@ export class ConceptsService {
       where: { documentId },
       select: { contentMd: true },
     });
-    await this.usage.consume(userId, 'graph');
+    await this.usage.reserve(userId, 'graph');
     const { concepts, edges } = await this.ai.extractConcepts(
       doc.title,
       summary?.contentMd ?? doc.text,
       doc.language ?? 'en',
+      userId,
     );
 
     // Create concepts, keep index → id map for edges.

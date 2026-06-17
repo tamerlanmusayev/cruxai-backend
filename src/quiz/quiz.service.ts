@@ -45,13 +45,14 @@ export class QuizService {
     const weak = fresh ? await this.mastery.weakConcepts(userId, documentId) : [];
     const source = await this.sourceText(documentId, doc.text);
 
-    await this.usage.consume(userId, 'quiz');
+    await this.usage.reserve(userId, 'quiz');
     const questions = await this.ai.makeQuiz(
       doc.title,
       source,
       doc.language ?? 'en',
       5,
       weak,
+      userId,
     );
     const quiz = await this.prisma.quiz.create({
       data: {

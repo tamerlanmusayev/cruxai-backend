@@ -18,6 +18,14 @@ export interface DocReadyEvent {
   title: string;
 }
 
+export interface AiTokensEvent {
+  kind: string;
+  inputTokens: number;
+  outputTokens: number;
+  credits: number;
+  done: boolean;
+}
+
 /**
  * Real-time hub:
  *  - live presence count (real, or simulated in DEMO_MODE)
@@ -73,6 +81,11 @@ export class RealtimeGateway
   /** Push a "document ready" event to a specific user's room. */
   notifyDocReady(userId: string, payload: DocReadyEvent) {
     this.server?.to(`user:${userId}`).emit('doc:ready', payload);
+  }
+
+  /** Live token/credit usage of an in-flight AI request, to the user's room. */
+  emitTokens(userId: string, payload: AiTokensEvent) {
+    this.server?.to(`user:${userId}`).emit('ai:tokens', payload);
   }
 
   private broadcast() {

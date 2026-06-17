@@ -52,8 +52,8 @@ export class BooksService {
     lang?: string,
     userId?: string,
   ): Promise<BookRecommendation[]> {
-    if (userId) await this.usage.consume(userId, 'recommend');
-    const recs = await this.ai.recommendBooks(topic, lang);
+    if (userId) await this.usage.reserve(userId, 'recommend');
+    const recs = await this.ai.recommendBooks(topic, lang, userId);
     return Promise.all(
       recs.map(async (r) => {
         let cover: string | null = null;

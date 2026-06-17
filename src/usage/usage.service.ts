@@ -41,6 +41,33 @@ export const FULL_FLOW_TOKENS =
   TOKEN_COST.exam +
   TOKEN_COST.grade; // ≈ 84k
 
+// Output tokens are ~5x pricier than input — weight them so the internal unit
+// stays roughly proportional to real $ regardless of input/output mix.
+const K_OUT = cost('CREDIT_K_OUT', 5);
+
+/** Relative $/token of the model (cheap Haiku < Sonnet < Opus). */
+function modelFactor(model: string): number {
+  const m = (model || '').toLowerCase();
+  if (m.includes('haiku')) return Number(process.env.MODEL_FACTOR_HAIKU) || 0.33;
+  if (m.includes('opus')) return Number(process.env.MODEL_FACTOR_OPUS) || 1.7;
+  return Number(process.env.MODEL_FACTOR_SONNET) || 1; // sonnet / default
+}
+
+/**
+ * Convert ACTUAL Anthropic usage into our internal weighted unit (same scale as
+ * the TOKEN_COST estimates). A cost guard ~proportional to money, not raw tokens.
+ */
+export function creditsFromUsage(
+  inputTokens: number,
+  outputTokens: number,
+  model: string,
+): number {
+  return Math.max(
+    1,
+    Math.round((inputTokens + K_OUT * outputTokens) * modelFactor(model)),
+  );
+}
+
 const GLOBAL_KEY = '__global__';
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -118,11 +145,11 @@ export class UsageService implements OnModuleInit {
   }
 
   /**
-   * Reserve `tokens` for an AI operation by `kind`. Bumps the per-user and
-   * global rolling windows, then throws 429 (and refunds) if either cap is
-   * exceeded. Call immediately BEFORE the real AI call (not on cache hits).
+   * Pre-gate before an AI call: reserve the ESTIMATED cost for `kind`. Bumps the
+   * per-user and global rolling windows, then throws 429 (and refunds) if either
+   * cap is exceeded. Reconcile to the real cost afterwards with `settle()`.
    */
-  async consume(userId: string, kind: GenKind): Promise<void> {
+  async reserve(userId: string, kind: GenKind): Promise<void> {
     const tokens = TOKEN_COST[kind];
     const u = await this.bump(userId, tokens);
     const g = await this.bump(GLOBAL_KEY, tokens);
@@ -148,6 +175,27 @@ export class UsageService implements OnModuleInit {
   }
 
   /**
+   * Reconcile a reservation to ACTUAL usage once the AI call finishes: adjusts
+   * the window by (actual − estimate). Never throws (the work is already done).
+   */
+  async settle(
+    userId: string,
+    kind: GenKind,
+    inputTokens: number,
+    outputTokens: number,
+    model: string,
+  ): Promise<void> {
+    const delta = creditsFromUsage(inputTokens, outputTokens, model) - TOKEN_COST[kind];
+    if (!delta) return;
+    try {
+      await this.bump(userId, delta);
+      await this.bump(GLOBAL_KEY, delta);
+    } catch (e) {
+      this.log.warn(`Settle failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
    * Remaining token budget for a user (no consumption). `resetsAt` is when the
    * current window refills (null if the user hasn't spent anything yet, or the
    * previous window already lapsed → full budget available now).
@@ -161,7 +209,7 @@ export class UsageService implements OnModuleInit {
   }> {
     const row = await this.prisma.usageWindow.findUnique({ where: { userId } });
     const active = row && Date.now() - row.windowStart.getTime() < WINDOW_MS;
-    const used = active ? row!.tokens : 0;
+    const used = active ? Math.max(0, row!.tokens) : 0;
     return {
       used,
       limit: this.userCap,

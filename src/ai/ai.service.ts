@@ -10,6 +10,8 @@ import {
   SummaryResult,
   SynthesisResult,
 } from './ai.types';
+import { GenKind, UsageService, creditsFromUsage } from '../usage/usage.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 // Keep input within a safe context budget (chars, not tokens — rough cap).
 // Lower cap = cheaper input; a chapter fits comfortably.
@@ -38,9 +40,16 @@ export class AiService {
   private readonly modelQuiz = process.env.MODEL_QUIZ ?? 'claude-haiku-4-5';
   private readonly modelGrade = process.env.MODEL_GRADE ?? 'claude-haiku-4-5';
 
+  constructor(
+    private readonly usage: UsageService,
+    private readonly realtime: RealtimeGateway,
+  ) {}
+
   /**
-   * Force structured output via a single tool. Claude must call the tool,
-   * so `input` is always valid JSON matching the schema — no brittle parsing.
+   * Force structured output via a single tool, STREAMED. Claude must call the
+   * tool, so `input` is always valid JSON matching the schema. Streaming lets us
+   * (a) push a live token/credit counter to the user during generation, and
+   * (b) read ACTUAL usage at the end to settle the budget by real cost.
    */
   private async structured<T>(opts: {
     model: string;
@@ -50,8 +59,10 @@ export class AiService {
     toolName: string;
     toolDescription: string;
     schema: Record<string, unknown>;
+    kind?: GenKind;
+    userId?: string;
   }): Promise<T> {
-    const res = await this.client.messages.create({
+    const stream = this.client.messages.stream({
       model: opts.model,
       max_tokens: opts.maxTokens,
       system: opts.system,
@@ -66,10 +77,60 @@ export class AiService {
       messages: [{ role: 'user', content: opts.user }],
     });
 
-    const block = res.content.find((b) => b.type === 'tool_use');
+    // Live counter: approximate output tokens from streamed JSON (chars/4),
+    // throttled, then replaced by the exact figure on completion.
+    const live = !!(opts.userId && opts.kind);
+    let inputTokens = 0;
+    let approxChars = 0;
+    let lastEmit = 0;
+    if (live) {
+      stream.on('streamEvent', (event) => {
+        if (event.type === 'message_start') {
+          inputTokens = event.message.usage?.input_tokens ?? 0;
+        } else if (event.type === 'content_block_delta') {
+          const d = event.delta as { type?: string; partial_json?: string; text?: string };
+          if (d.type === 'input_json_delta' && d.partial_json) approxChars += d.partial_json.length;
+          else if (d.type === 'text_delta' && d.text) approxChars += d.text.length;
+          const now = Date.now();
+          if (now - lastEmit > 300) {
+            lastEmit = now;
+            const out = Math.round(approxChars / 4);
+            this.realtime.emitTokens(opts.userId!, {
+              kind: opts.kind!,
+              inputTokens,
+              outputTokens: out,
+              credits: creditsFromUsage(inputTokens, out, opts.model),
+              done: false,
+            });
+          }
+        }
+      });
+    }
+
+    const final = await stream.finalMessage();
+    const block = final.content.find((b) => b.type === 'tool_use');
     if (!block || block.type !== 'tool_use') {
       throw new Error('Model did not return structured output');
     }
+
+    if (live) {
+      const u = final.usage;
+      this.realtime.emitTokens(opts.userId!, {
+        kind: opts.kind!,
+        inputTokens: u.input_tokens,
+        outputTokens: u.output_tokens,
+        credits: creditsFromUsage(u.input_tokens, u.output_tokens, opts.model),
+        done: true,
+      });
+      await this.usage.settle(
+        opts.userId!,
+        opts.kind!,
+        u.input_tokens,
+        u.output_tokens,
+        opts.model,
+      );
+    }
+
     return block.input as T;
   }
 
@@ -85,6 +146,7 @@ export class AiService {
     title: string,
     chunks: { ordinal: number; section: string | null; text: string }[],
     targetLang?: string,
+    userId?: string,
   ): Promise<SummaryResult> {
     const langName = LANG_NAMES[targetLang ?? ''];
     const langRule = langName
@@ -118,6 +180,8 @@ export class AiService {
         '\n--- PASSAGES END ---',
       toolName: 'save_summary',
       toolDescription: 'Save the study summary with citations.',
+      kind: 'summary',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -164,6 +228,8 @@ export class AiService {
     language: string,
     count = 5,
     focusConcepts: string[] = [],
+    userId?: string,
+    kind: GenKind = 'quiz',
   ): Promise<QuizQuestion[]> {
     const focus = focusConcepts.length
       ? `The student is weak on these topics — prioritise questions that test ` +
@@ -187,6 +253,8 @@ export class AiService {
         '\n--- DOCUMENT END ---',
       toolName: 'save_quiz',
       toolDescription: 'Save the generated quiz questions.',
+      kind,
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -232,6 +300,7 @@ export class AiService {
     title: string,
     text: string,
     language: string,
+    userId?: string,
   ): Promise<FlashcardDraft[]> {
     const result = await this.structured<FlashcardResult>({
       model: this.modelQuiz,
@@ -249,6 +318,8 @@ export class AiService {
         '\n--- DOCUMENT END ---',
       toolName: 'save_flashcards',
       toolDescription: 'Save the generated flashcards.',
+      kind: 'flashcards',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -280,6 +351,7 @@ export class AiService {
     title: string,
     text: string,
     language: string,
+    userId?: string,
   ): Promise<ConceptResult> {
     return this.structured<ConceptResult>({
       model: this.modelQuiz,
@@ -297,6 +369,8 @@ export class AiService {
         '\n--- DOCUMENT END ---',
       toolName: 'save_graph',
       toolDescription: 'Save the concept knowledge graph.',
+      kind: 'graph',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -339,6 +413,7 @@ export class AiService {
     sources: { title: string; text: string }[],
     query: string,
     language: string,
+    userId?: string,
   ): Promise<SynthesisResult> {
     const labeled = sources
       .map((s, i) => `=== SOURCE ${i + 1}: ${s.title} ===\n${this.clip(s.text)}`)
@@ -357,6 +432,8 @@ export class AiService {
         labeled,
       toolName: 'save_synthesis',
       toolDescription: 'Save the multi-source synthesis.',
+      kind: 'synthesis',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -386,6 +463,7 @@ export class AiService {
   async bookOverview(
     title: string,
     targetLang?: string,
+    userId?: string,
   ): Promise<{ contentMd: string; keyPoints: string[]; language: string }> {
     const langName = LANG_NAMES[targetLang ?? ''];
     const langRule = langName
@@ -407,6 +485,8 @@ export class AiService {
         'Use headings and bullet lists. Then give 5–8 key takeaways.',
       toolName: 'save_overview',
       toolDescription: 'Save the book overview.',
+      kind: 'overview',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -423,6 +503,7 @@ export class AiService {
   async recommendBooks(
     topic: string,
     targetLang?: string,
+    userId?: string,
   ): Promise<{ title: string; author: string; why: string }[]> {
     const langName = LANG_NAMES[targetLang ?? ''] ?? 'English';
     const result = await this.structured<{
@@ -440,6 +521,8 @@ export class AiService {
         'why it is worth reading for this goal.',
       toolName: 'save_recommendations',
       toolDescription: 'Save the recommended book list.',
+      kind: 'recommend',
+      userId,
       schema: {
         type: 'object',
         properties: {
@@ -468,6 +551,7 @@ export class AiService {
     questions: QuizQuestion[],
     answers: number[],
     language: string,
+    userId?: string,
   ): Promise<GradeResult> {
     const payload = questions.map((q, i) => ({
       index: i,
@@ -489,6 +573,8 @@ export class AiService {
         JSON.stringify(payload, null, 2),
       toolName: 'save_feedback',
       toolDescription: 'Save per-question grading feedback.',
+      kind: 'grade',
+      userId,
       schema: {
         type: 'object',
         properties: {
